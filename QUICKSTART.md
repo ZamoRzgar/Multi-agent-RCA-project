@@ -1,16 +1,33 @@
 # Quick Start Guide
 
-## Initial Setup (5 minutes)
+## Initial Setup (10 minutes)
 
-### 1. Create Virtual Environment
+> **💡 Recommendation**: Use **Conda** instead of venv for this project!  
+> See `CONDA_SETUP.md` for full Conda instructions (easier and better for ML/AI).
+
+### Option A: Conda (Recommended ⭐)
+
 ```bash
 cd /home/zamo/projects/log
-python -m venv venv
-source venv/bin/activate
+
+# Create environment with Python 3.10 + all dependencies
+conda env create -f environment.yml
+
+# Activate
+conda activate multimodel-rca
+
+# Install spaCy model
+python -m spacy download en_core_web_sm
 ```
 
-### 2. Install Dependencies
+### Option B: venv (Traditional)
+
 ```bash
+cd /home/zamo/projects/log
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 ```

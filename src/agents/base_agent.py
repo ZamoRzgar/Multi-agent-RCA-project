@@ -70,9 +70,25 @@ class BaseAgent(ABC):
         Returns:
             LLM response
         """
-        # TODO: Implement LLM API call
-        # This will be implemented using the LLM client utility
-        raise NotImplementedError("LLM client integration pending")
+        from src.utils.local_llm_client import LocalLLMClient
+        
+        # Initialize client if not already done
+        if not hasattr(self, '_llm_client'):
+            self._llm_client = LocalLLMClient(
+                backend="ollama",
+                model=self.model
+            )
+        
+        try:
+            response = self._llm_client.generate(
+                prompt=prompt,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
+            )
+            return response
+        except Exception as e:
+            logger.error(f"LLM call failed: {e}")
+            raise
     
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name='{self.name}', model='{self.model}')"

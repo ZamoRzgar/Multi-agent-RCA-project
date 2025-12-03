@@ -35,6 +35,9 @@ pydantic>=2.5.3
 requests>=2.31.0
 httpx>=0.26.0
 
+# Optional: For vLLM backend (advanced users)
+# vllm>=0.2.7  # Uncomment if using vLLM instead of Ollama
+
 # Testing
 pytest>=7.4.4
 pytest-cov>=4.1.0

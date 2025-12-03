@@ -2,11 +2,63 @@
 
 # LLM Configuration
 llm:
-  provider: "openai"  # Options: openai, anthropic, local
-  model: "gpt-4-turbo-preview"
+  provider: "local"  # Options: openai, anthropic, local
+  backend: "ollama"  # Options: ollama, vllm
+  model: "qwen2:7b"
   temperature: 0.7
   max_tokens: 2048
-  timeout: 60
+  timeout: 120
+
+# Local Model Configuration (for multi-model setup)
+local_models:
+  # Log Parser - Qwen2 for structured extraction
+  log_parser:
+    backend: "ollama"
+    base_url: "http://localhost:11434"
+    model: "qwen2:7b"
+    temperature: 0.3
+  
+  # KG Retrieval - Qwen2 for query understanding
+  kg_retrieval:
+    backend: "ollama"
+    base_url: "http://localhost:11434"
+    model: "qwen2:7b"
+    temperature: 0.5
+  
+  # RCA Reasoner (Log-focused) - Mistral for reasoning
+  rca_reasoner_log:
+    backend: "ollama"
+    base_url: "http://localhost:11434"
+    model: "mistral:7b"
+    temperature: 0.7
+  
+  # RCA Reasoner (KG-focused) - LLaMA for knowledge integration
+  rca_reasoner_kg:
+    backend: "ollama"
+    base_url: "http://localhost:11434"
+    model: "llama2:7b"
+    temperature: 0.7
+  
+  # RCA Reasoner (Hybrid) - Qwen2 for balanced approach
+  rca_reasoner_hybrid:
+    backend: "ollama"
+    base_url: "http://localhost:11434"
+    model: "qwen2:7b"
+    temperature: 0.7
+  
+  # Judge Agent - Mistral for evaluation
+  judge:
+    backend: "ollama"
+    base_url: "http://localhost:11434"
+    model: "mistral:7b"
+    temperature: 0.2
+  
+  # Default fallback
+  default:
+    backend: "ollama"
+    base_url: "http://localhost:11434"
+    model: "qwen2:7b"
+    temperature: 0.7
 
 # Agent Configuration
 agents:

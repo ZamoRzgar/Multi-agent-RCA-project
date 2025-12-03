@@ -82,3 +82,4 @@ docs/.doctrees/
 
 # Neo4j
 .neo4j/
+CONDA_SETUP.md
