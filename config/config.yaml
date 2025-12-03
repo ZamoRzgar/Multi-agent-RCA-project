@@ -1,0 +1,124 @@
+# AetherLog 2.0 Multi-Agent RCA Configuration
+
+# LLM Configuration
+llm:
+  provider: "openai"  # Options: openai, anthropic, local
+  model: "gpt-4-turbo-preview"
+  temperature: 0.7
+  max_tokens: 2048
+  timeout: 60
+
+# Agent Configuration
+agents:
+  log_parser:
+    enabled: true
+    model: "gpt-4-turbo-preview"
+    temperature: 0.3
+    
+  kg_retrieval:
+    enabled: true
+    top_k_facts: 10
+    similarity_threshold: 0.7
+    
+  rca_reasoners:
+    count: 3
+    types:
+      - "log_focused"
+      - "kg_focused"
+      - "hybrid"
+    temperature: 0.7
+    
+  judge:
+    enabled: true
+    model: "gpt-4-turbo-preview"
+    temperature: 0.2
+    scoring_criteria:
+      - "evidence_support"
+      - "logical_consistency"
+      - "completeness"
+      - "kg_alignment"
+
+# Debate Protocol
+debate:
+  enabled: true
+  max_rounds: 2
+  critique_enabled: true
+  refinement_enabled: true
+  consensus_threshold: 0.8
+
+# Knowledge Graph Configuration
+knowledge_graph:
+  database: "neo4j"
+  uri: "bolt://localhost:7687"
+  user: "neo4j"
+  password: "${NEO4J_PASSWORD}"
+  
+  construction:
+    entity_extraction: true
+    relation_extraction: true
+    entity_normalization: true
+    min_support: 2
+    
+  retrieval:
+    max_hops: 2
+    max_paths: 5
+
+# Log Parsing Configuration
+log_parsing:
+  parser_type: "drain"  # Options: drain, spell, lenma
+  drain:
+    depth: 4
+    similarity_threshold: 0.4
+    max_children: 100
+
+# Evaluation Configuration
+evaluation:
+  metrics:
+    - "accuracy"
+    - "f1_score"
+    - "hallucination_rate"
+    - "explanation_quality"
+    - "agent_agreement"
+  
+  hallucination_detection:
+    check_log_grounding: true
+    check_kg_grounding: true
+    
+  human_evaluation:
+    enabled: false
+    sample_size: 50
+
+# Data Configuration
+data:
+  datasets:
+    - name: "alibaba"
+      path: "data/raw/alibaba"
+    - name: "telecom"
+      path: "data/raw/telecom"
+  
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+
+# Experiment Configuration
+experiments:
+  baselines:
+    - "single_llm_no_kg"
+    - "single_llm_with_kg"
+    - "self_consistency"
+    - "multi_agent_no_debate"
+  
+  ablations:
+    - "no_judge"
+    - "no_kg"
+    - "no_debate"
+  
+  output_dir: "experiments/results"
+  save_transcripts: true
+
+# Logging Configuration
+logging:
+  level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/aetherlog.log"
+  console: true
