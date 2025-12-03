@@ -84,3 +84,4 @@ docs/.doctrees/
 .neo4j/
 CONDA_SETUP.md
 .env.example
+.windsurf/workflows/Action-.md

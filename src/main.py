@@ -1,5 +1,5 @@
 """
-Main entry point for AetherLog 2.0 Multi-Agent RCA System.
+Main entry point for Multi-Agent RCA System.
 """
 
 import argparse
