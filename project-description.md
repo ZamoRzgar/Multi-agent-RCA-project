@@ -78,7 +78,7 @@ What is the computational and latency overhead of multi-agent RCA compared to si
 
 Phase 2 – System Design (Weeks 4–6)
 
-Specify AetherLog 2.0 architecture:
+Specify architecture:
 
 Agent roles, inputs/outputs, and protocols (parsing → KG lookup → hypothesis generation → debate → judge).
 
