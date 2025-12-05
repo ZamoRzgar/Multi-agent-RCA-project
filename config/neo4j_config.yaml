@@ -1,0 +1,23 @@
+# Neo4j Configuration
+
+neo4j:
+  # Connection settings
+  uri: "bolt://localhost:7687"
+  username: "neo4j"
+  password: "1997Amaterasu"  # UPDATE THIS
+  database: "neo4j"
+  
+  # Connection pool settings
+  max_connection_lifetime: 3600  # seconds
+  max_connection_pool_size: 50
+  connection_acquisition_timeout: 60  # seconds
+  
+  # Query settings
+  max_query_time: 30  # seconds
+  fetch_size: 1000
+  
+  # Retry settings
+  max_retry_time: 30  # seconds
+  initial_retry_delay: 1  # seconds
+  retry_delay_multiplier: 2.0
+  retry_delay_jitter_factor: 0.2
