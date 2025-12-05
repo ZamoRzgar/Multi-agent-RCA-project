@@ -128,7 +128,7 @@ Short KG design section (schema, example triples).
 
 Phase 4 – Multi-Agent Implementation (Weeks 8–12)
 
-Implement agents using Python + LLM API (or local LLM):
+Implement agents using Python + (local LLM):
 
 Agent 1: Log Parser – extract events/entities; produce structured representation.
 

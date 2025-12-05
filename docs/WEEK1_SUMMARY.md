@@ -43,7 +43,7 @@
 
 ### 1. Environment Setup
 ```bash
-✅ Miniconda installed
+✅ Anaconda installed
 ✅ Environment created: multimodel-rca
 ✅ 50+ packages installed
 ✅ Ollama installed and configured
