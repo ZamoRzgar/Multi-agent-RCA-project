@@ -2,7 +2,6 @@
 Debate protocol for multi-agent collaboration.
 """
 
-from .protocol import DebateProtocol
-from .scoring import HypothesisScorer
+from .debate_coordinator import DebateCoordinator
 
-__all__ = ["DebateProtocol", "HypothesisScorer"]
+__all__ = ["DebateCoordinator"]
