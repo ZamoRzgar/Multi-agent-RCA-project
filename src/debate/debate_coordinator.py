@@ -87,7 +87,8 @@ class DebateCoordinator:
             round_result = self.run_round(
                 round_num,
                 input_data,
-                feedback
+                feedback,
+                rounds_results
             )
             
             rounds_results.append(round_result)
@@ -131,7 +132,8 @@ class DebateCoordinator:
         self,
         round_num: int,
         input_data: Dict[str, Any],
-        feedback: Dict[str, Any]
+        feedback: Dict[str, Any],
+        rounds_results: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
         Execute single debate round.
@@ -140,6 +142,7 @@ class DebateCoordinator:
             round_num: Current round number
             input_data: Incident data
             feedback: Feedback from previous round (empty for round 1)
+            rounds_results: Previous rounds results
             
         Returns:
             Round results with hypotheses and evaluation
@@ -148,6 +151,7 @@ class DebateCoordinator:
         
         # Generate/refine hypotheses from each reasoner
         all_hypotheses = {}
+        previous_round = rounds_results[-1] if rounds_results else None
         
         for name, reasoner in self.reasoners.items():
             logger.info(f"  - {name}...")
@@ -157,11 +161,31 @@ class DebateCoordinator:
                 result = reasoner.process(input_data)
             else:
                 # Round 2+: Refined hypotheses with feedback
-                # For now, just regenerate (refinement can be added later)
-                result = reasoner.process(input_data)
+                # Get this reasoner's previous hypotheses
+                prev_hyp_key = f"{name}_hypotheses"
+                previous_hypotheses = previous_round["hypotheses"].get(prev_hyp_key, [])
+                
+                # Get feedback for this reasoner
+                reasoner_feedback = feedback.get(name, [])
+                
+                # Get other reasoners' top hypotheses
+                other_top = self._get_other_top_hypotheses(
+                    previous_round["evaluation"]["evaluated_hypotheses"],
+                    name
+                )
+                
+                # Refine hypotheses
+                logger.info(f"    Refining with {len(reasoner_feedback)} feedback items...")
+                result = reasoner.refine_hypotheses(
+                    input_data,
+                    previous_hypotheses,
+                    reasoner_feedback,
+                    other_top
+                )
             
             all_hypotheses[f"{name}_hypotheses"] = result["hypotheses"]
-            logger.info(f"    ✓ Generated {len(result['hypotheses'])} hypotheses")
+            refined_tag = " (refined)" if result.get("refined", False) else ""
+            logger.info(f"    ✓ Generated {len(result['hypotheses'])} hypotheses{refined_tag}")
         
         # Judge evaluates all hypotheses
         logger.info(f"\nJudge evaluating hypotheses...")
@@ -219,6 +243,34 @@ class DebateCoordinator:
             })
         
         return feedback
+    
+    def _get_other_top_hypotheses(
+        self,
+        all_evaluated: List[Dict[str, Any]],
+        exclude_source: str,
+        top_n: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Get top hypotheses from other reasoners.
+        
+        Args:
+            all_evaluated: All evaluated hypotheses
+            exclude_source: Source to exclude (this reasoner)
+            top_n: Number of top hypotheses to get
+            
+        Returns:
+            List of top hypotheses from other reasoners
+        """
+        # Filter out this reasoner's hypotheses
+        other_hypotheses = [
+            h for h in all_evaluated
+            if h.get("source", "") != exclude_source
+        ]
+        
+        # Sort by score and take top N
+        other_hypotheses.sort(key=lambda x: x.get("judge_score", 0), reverse=True)
+        
+        return other_hypotheses[:top_n]
     
     def check_convergence(
         self,

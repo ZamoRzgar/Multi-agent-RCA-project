@@ -96,6 +96,176 @@ class RCAReasonerAgent(BaseAgent):
             "num_hypotheses": len(ranked_hypotheses)
         }
     
+    def refine_hypotheses(
+        self,
+        input_data: Dict[str, Any],
+        previous_hypotheses: List[Dict[str, Any]],
+        judge_feedback: List[Dict[str, Any]],
+        other_top_hypotheses: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Refine hypotheses based on judge feedback and other reasoners' hypotheses.
+        
+        Args:
+            input_data: Original incident data
+            previous_hypotheses: This reasoner's previous hypotheses
+            judge_feedback: Feedback from judge on previous hypotheses
+            other_top_hypotheses: Top hypotheses from other reasoners
+            
+        Returns:
+            Dictionary with refined hypotheses
+        """
+        logger.info(f"Refining hypotheses based on judge feedback")
+        
+        # Build refinement prompt
+        prompt = self._build_refinement_prompt(
+            input_data,
+            previous_hypotheses,
+            judge_feedback,
+            other_top_hypotheses
+        )
+        
+        # Call LLM
+        logger.debug(f"Calling LLM for refinement with prompt length: {len(prompt)}")
+        response = self._call_llm(prompt)
+        
+        # Parse refined hypotheses
+        refined_hypotheses = self._parse_hypotheses(response)
+        
+        # Rank by confidence
+        ranked = self._rank_hypotheses(refined_hypotheses)
+        
+        logger.info(f"Generated {len(ranked)} refined hypotheses")
+        
+        return {
+            "hypotheses": ranked,
+            "reasoning_type": self.reasoning_type,
+            "model_used": self.model,
+            "num_hypotheses": len(ranked),
+            "refined": True
+        }
+    
+    def _build_refinement_prompt(
+        self,
+        input_data: Dict[str, Any],
+        previous_hypotheses: List[Dict[str, Any]],
+        judge_feedback: List[Dict[str, Any]],
+        other_top_hypotheses: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Build refinement prompt with feedback.
+        
+        Args:
+            input_data: Original incident data
+            previous_hypotheses: Previous hypotheses
+            judge_feedback: Judge's feedback
+            other_top_hypotheses: Other reasoners' top hypotheses
+            
+        Returns:
+            Refinement prompt string
+        """
+        # Format previous hypotheses with feedback
+        prev_hyp_str = self._format_previous_hypotheses(previous_hypotheses, judge_feedback)
+        
+        # Format other reasoners' hypotheses
+        other_hyp_str = self._format_other_hypotheses(other_top_hypotheses)
+        
+        # Get base context
+        base_prompt = self._build_reasoning_prompt(input_data)
+        
+        refinement_prompt = f"""You are refining your root cause hypotheses based on judge feedback and insights from other reasoners.
+
+=== YOUR PREVIOUS HYPOTHESES & JUDGE FEEDBACK ===
+
+{prev_hyp_str}
+
+=== OTHER REASONERS' TOP HYPOTHESES ===
+
+{other_hyp_str}
+
+=== INSTRUCTIONS FOR REFINEMENT ===
+
+Based on the judge's feedback and other reasoners' insights:
+
+1. **Address weaknesses** identified by the judge
+2. **Strengthen evidence** and reasoning
+3. **Incorporate insights** from other reasoners where relevant
+4. **Improve resolution** steps to be more specific and actionable
+5. **Adjust confidence** based on evidence strength
+
+You may:
+- Refine existing hypotheses to address weaknesses
+- Merge similar hypotheses if they complement each other
+- Generate new hypotheses if you identify gaps
+- Increase confidence if evidence is stronger
+- Decrease confidence if weaknesses are significant
+
+=== ORIGINAL INCIDENT DATA ===
+
+{base_prompt.split('===')[-1] if '===' in base_prompt else base_prompt}
+
+Provide your refined hypotheses in the same JSON format as before.
+Focus on quality over quantity - 2-4 strong hypotheses are better than many weak ones.
+"""
+        
+        return refinement_prompt
+    
+    def _format_previous_hypotheses(
+        self,
+        hypotheses: List[Dict[str, Any]],
+        feedback: List[Dict[str, Any]]
+    ) -> str:
+        """Format previous hypotheses with judge feedback."""
+        if not hypotheses:
+            return "No previous hypotheses"
+        
+        formatted = []
+        for i, hyp in enumerate(hypotheses[:3], 1):  # Top 3
+            # Find matching feedback
+            feedback_item = next(
+                (f for f in feedback if f.get("hypothesis", "").startswith(hyp.get("hypothesis", "")[:50])),
+                {}
+            )
+            
+            formatted.append(
+                f"Hypothesis {i}:\n"
+                f"  Statement: {hyp.get('hypothesis', 'N/A')}\n"
+                f"  Your Confidence: {hyp.get('confidence', 0):.2f}\n"
+                f"  Judge Score: {feedback_item.get('score', 'N/A')}/100\n"
+                f"  \n"
+                f"  Strengths:\n"
+            )
+            
+            for strength in feedback_item.get('strengths', ['No strengths noted']):
+                formatted.append(f"    ✓ {strength}\n")
+            
+            formatted.append(f"  \n  Weaknesses:\n")
+            for weakness in feedback_item.get('weaknesses', ['No weaknesses noted']):
+                formatted.append(f"    ✗ {weakness}\n")
+            
+            if feedback_item.get('feedback'):
+                formatted.append(f"  \n  Judge Feedback: {feedback_item['feedback'][:200]}...\n")
+            
+            formatted.append("\n")
+        
+        return ''.join(formatted)
+    
+    def _format_other_hypotheses(self, other_hypotheses: List[Dict[str, Any]]) -> str:
+        """Format other reasoners' top hypotheses."""
+        if not other_hypotheses:
+            return "No hypotheses from other reasoners"
+        
+        formatted = []
+        for i, hyp in enumerate(other_hypotheses[:3], 1):  # Top 3
+            formatted.append(
+                f"{i}. [{hyp.get('source', 'unknown')}] "
+                f"Score: {hyp.get('judge_score', hyp.get('score', 'N/A'))}/100\n"
+                f"   {hyp.get('hypothesis', 'N/A')[:100]}...\n"
+                f"   Confidence: {hyp.get('confidence', 0):.2f}\n\n"
+            )
+        
+        return ''.join(formatted)
+    
     @abstractmethod
     def _build_reasoning_prompt(self, input_data: Dict[str, Any]) -> str:
         """
