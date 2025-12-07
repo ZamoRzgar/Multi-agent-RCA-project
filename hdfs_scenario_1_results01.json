@@ -1,0 +1,14 @@
+{
+  "scenario_id": 1,
+  "dataset": "HDFS",
+  "num_events": 100,
+  "total_rounds": 2,
+  "convergence": true,
+  "score_trajectory": [
+    95,
+    95
+  ],
+  "final_score": 95,
+  "final_hypothesis": "Network connectivity issue causing intermittent service disruptions",
+  "final_source": "hybrid"
+}
