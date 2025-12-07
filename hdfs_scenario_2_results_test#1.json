@@ -1,0 +1,14 @@
+{
+  "scenario_id": 2,
+  "dataset": "HDFS",
+  "num_events": 100,
+  "total_rounds": 2,
+  "convergence": true,
+  "score_trajectory": [
+    90,
+    90
+  ],
+  "final_score": 90,
+  "final_hypothesis": "Software Configuration Issue",
+  "final_source": "hybrid"
+}
