@@ -1,0 +1,14 @@
+{
+  "scenario_id": 2,
+  "dataset": "Hadoop",
+  "num_events": 100,
+  "total_rounds": 2,
+  "convergence": true,
+  "score_trajectory": [
+    90,
+    87
+  ],
+  "final_score": 90,
+  "final_hypothesis": "Insufficient resources allocation leading to slow task attempts",
+  "final_source": "hybrid"
+}

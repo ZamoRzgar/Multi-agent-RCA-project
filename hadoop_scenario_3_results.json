@@ -1,0 +1,15 @@
+{
+  "scenario_id": 3,
+  "dataset": "Hadoop",
+  "num_events": 100,
+  "total_rounds": 3,
+  "convergence": false,
+  "score_trajectory": [
+    85,
+    90,
+    90
+  ],
+  "final_score": 90,
+  "final_hypothesis": "Network Connectivity Issue with Resource Overload",
+  "final_source": "hybrid"
+}
