@@ -1,0 +1,14 @@
+{
+  "scenario_id": 3,
+  "dataset": "Spark",
+  "num_events": 100,
+  "total_rounds": 2,
+  "convergence": true,
+  "score_trajectory": [
+    90,
+    90
+  ],
+  "final_score": 90,
+  "final_hypothesis": "Resource contention due to high concurrent tasks",
+  "final_source": "hybrid"
+}
