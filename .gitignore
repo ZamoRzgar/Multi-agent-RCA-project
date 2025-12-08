@@ -93,3 +93,14 @@ docs/setup/NEO4J_SETUP.md
 docs/KG_RETRIEVAL_COMPLETE.md
 
 docs/THREE_SCENARIOS_ANALYSIS.md
+docs/figures/all_scenarios_heatmap.png
+docs/figures/convergence_comparison.png
+.gitignore
+docs/figures/score_distribution.png
+.gitignore
+docs/figures/score_trajectories.png
+docs/figures/score_comparison.png
+.gitignore
+docs/figures/rounds_comparison.png
+docs/figures/summary_stats.png
+scripts/visualize_results.py
