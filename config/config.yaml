@@ -103,7 +103,7 @@ knowledge_graph:
   database: "neo4j"
   uri: "bolt://localhost:7687"
   user: "neo4j"
-  password: "${NEO4J_PASSWORD}"
+  password: "1997Amaterasu"  # Your Neo4j password
   
   construction:
     entity_extraction: true

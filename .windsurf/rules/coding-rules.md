@@ -11,3 +11,4 @@ trigger: manual
 -Do not use sample data. If you want to make sample data first ask me then I will tell you to do it or not.
 -Do not try to run the tests yourself tell me what to run and then I will send you the result
 -Do not create non-existant data, if you don't have the data say you don't have it and tell me we need to get it.
+-Do not make a simple version of any file always the full version.

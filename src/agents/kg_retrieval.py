@@ -4,10 +4,14 @@ Knowledge Graph Retrieval Agent: Retrieves relevant facts from KG.
 
 from typing import Dict, Any, List, Optional
 from loguru import logger
-from neo4j import GraphDatabase
-import yaml
+import sys
+from pathlib import Path
+
+# Add src to path for kg.query import
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from .base_agent import BaseAgent
+from kg.query import KGQuery
 
 
 class KGRetrievalAgent(BaseAgent):
@@ -19,36 +23,18 @@ class KGRetrievalAgent(BaseAgent):
     - Known failure modes
     """
     
-    def __init__(
-        self,
-        uri: str = "bolt://localhost:7687",
-        username: str = "neo4j",
-        password: str = None,
-        **kwargs
-    ):
+    def __init__(self, **kwargs):
         super().__init__(name="KGRetrievalAgent", **kwargs)
-        self.top_k = self.config.get("top_k_facts", 10)
+        self.top_k = self.config.get("top_k_facts", 5)
         self.similarity_threshold = self.config.get("similarity_threshold", 0.7)
         
-        # Load config if password not provided
-        if password is None:
-            try:
-                with open("config/neo4j_config.yaml", "r") as f:
-                    config = yaml.safe_load(f)
-                    password = config["neo4j"]["password"]
-                    uri = config["neo4j"].get("uri", uri)
-                    username = config["neo4j"].get("username", username)
-            except Exception as e:
-                logger.warning(f"Could not load Neo4j config: {e}")
-        
-        # Initialize Neo4j driver
+        # Initialize KG Query interface
         try:
-            self.driver = GraphDatabase.driver(uri, auth=(username, password))
-            self.driver.verify_connectivity()
-            logger.info(f"Connected to Neo4j at {uri}")
+            self.kg_query = KGQuery(self.config)
+            logger.info("KG Retrieval Agent initialized with KGQuery")
         except Exception as e:
-            logger.error(f"Failed to connect to Neo4j: {e}")
-            self.driver = None
+            logger.error(f"Failed to initialize KGQuery: {e}")
+            self.kg_query = None
     
     def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -60,48 +46,82 @@ class KGRetrievalAgent(BaseAgent):
         Returns:
             Dictionary with retrieved KG facts:
             - similar_incidents: Similar historical incidents
-            - causal_paths: Potential causal chains
             - entity_context: Context for entities
-            - patterns: Common patterns
+            - all_entities: All entities in KG for reference
         """
-        if not self.driver:
-            logger.warning("Neo4j driver not initialized, returning empty results")
+        if not self.kg_query or not self.kg_query.driver:
+            logger.warning("KGQuery not initialized, returning empty results")
             return {
                 "similar_incidents": [],
-                "causal_paths": [],
                 "entity_context": {},
-                "patterns": []
+                "all_entities": []
             }
         
         entities = input_data.get("entities", [])
         events = input_data.get("events", [])
-        errors = input_data.get("error_messages", [])
         
         logger.info(f"Retrieving KG facts for {len(events)} events, {len(entities)} entities")
         
-        # Query similar incidents
-        similar_incidents = self.query_similar_incidents(events, entities, errors)
+        # Extract entity names from parsed data
+        entity_names = self._extract_entity_names(entities, events)
         
-        # Find causal paths
-        causal_paths = self.find_causal_paths(events, errors)
+        # Query similar incidents using KGQuery
+        similar_incidents = self.kg_query.find_similar_incidents(
+            entities=entity_names,
+            symptoms=[],  # Future: extract symptoms from events
+            top_k=self.top_k
+        )
         
-        # Get entity context
-        entity_context = self.get_entity_context(entities)
+        # Get entity context for each entity
+        entity_context = {}
+        for entity_name in entity_names[:5]:  # Limit to top 5 entities
+            info = self.kg_query.get_entity_info(entity_name)
+            if info:
+                entity_context[entity_name] = info
         
-        # Get common patterns
-        patterns = self.get_common_patterns(events)
+        # Get all entities for reference
+        all_entities = self.kg_query.get_all_entities()
         
         kg_facts = {
             "similar_incidents": similar_incidents,
-            "causal_paths": causal_paths,
             "entity_context": entity_context,
-            "patterns": patterns
+            "all_entities": all_entities[:10]  # Top 10 most common
         }
         
         logger.info(f"Retrieved {len(similar_incidents)} similar incidents, "
-                   f"{len(causal_paths)} causal paths")
+                   f"{len(entity_context)} entity contexts")
         
         return kg_facts
+    
+    def _extract_entity_names(self, entities: List[Dict[str, Any]], events: List[Dict[str, Any]]) -> List[str]:
+        """
+        Extract entity names from parsed data.
+        
+        Args:
+            entities: List of entity dictionaries
+            events: List of event dictionaries
+            
+        Returns:
+            List of unique entity names
+        """
+        entity_names = set()
+        
+        # From entities list
+        for entity in entities:
+            if isinstance(entity, dict) and 'name' in entity:
+                entity_names.add(entity['name'])
+            elif isinstance(entity, str):
+                entity_names.add(entity)
+        
+        # From events (components, error types)
+        for event in events:
+            if isinstance(event, dict):
+                if 'component' in event and event['component']:
+                    entity_names.add(event['component'])
+                if 'error_type' in event and event['error_type']:
+                    entity_names.add(event['error_type'])
+        
+        return list(entity_names)
     
     def query_similar_incidents(
         self,
@@ -112,6 +132,7 @@ class KGRetrievalAgent(BaseAgent):
     ) -> List[Dict[str, Any]]:
         """
         Find similar past incidents based on events, entities, and errors.
+        Uses KGQuery for data access.
         
         Args:
             events: List of events
@@ -122,85 +143,47 @@ class KGRetrievalAgent(BaseAgent):
         Returns:
             List of similar incidents with similarity scores
         """
-        logger.info("Querying similar incidents")
+        logger.info("Querying similar incidents via KGQuery")
         
-        # Extract components and error types for matching
-        components = list(set(e.get("component", "") for e in events if e.get("component")))
-        error_types = list(set(e.get("error_type", "") for e in errors if e.get("error_type")))
-        entity_names = list(set(e.get("name", "") for e in entities if e.get("name")))
-        
-        if not components and not error_types and not entity_names:
-            logger.warning("No components, errors, or entities to match")
+        if not self.kg_query or not self.kg_query.driver:
+            logger.warning("KGQuery not available")
             return []
         
-        # Build Cypher query
-        query = """
-        // Find incidents with similar components
-        MATCH (i:Incident)-[:CONTAINS]->(e:Event)
-        WHERE e.component IN $components
+        # Extract entity names
+        entity_names = self._extract_entity_names(entities, events)
         
-        // Optional: Match error types
-        OPTIONAL MATCH (e)-[:REPORTS]->(err:Error)
-        WHERE err.error_type IN $error_types
+        # Extract symptoms from errors
+        symptoms = [e.get("error_type", "") for e in errors if e.get("error_type")]
         
-        // Optional: Match entities
-        OPTIONAL MATCH (e)-[:INVOLVES]->(entity:Entity)
-        WHERE entity.name IN $entity_names
+        if not entity_names:
+            logger.warning("No entities to match")
+            return []
         
-        // Calculate similarity score
-        WITH i, 
-             count(DISTINCT e) AS event_matches,
-             count(DISTINCT err) AS error_matches,
-             count(DISTINCT entity) AS entity_matches
+        # Use KGQuery to find similar incidents
+        incidents = self.kg_query.find_similar_incidents(
+            entities=entity_names,
+            symptoms=symptoms,
+            top_k=limit
+        )
         
-        WITH i,
-             (event_matches * 1.0 + error_matches * 2.0 + entity_matches * 1.5) AS similarity_score
-        
-        WHERE similarity_score > 0
-        
-        // Get incident details
-        MATCH (i)-[:CONTAINS]->(ie:Event)
-        OPTIONAL MATCH (i)-[:HAS_ROOT_CAUSE]->(rc:RootCause)
-        
-        RETURN i.id AS incident_id,
-               i.timestamp AS timestamp,
-               i.dataset AS dataset,
-               i.label AS label,
-               i.root_cause AS root_cause,
-               similarity_score,
-               collect(DISTINCT ie.component) AS components,
-               rc.description AS root_cause_description,
-               rc.category AS root_cause_category
-        
-        ORDER BY similarity_score DESC
-        LIMIT $limit
-        """
-        
-        parameters = {
-            "components": components,
-            "error_types": error_types,
-            "entity_names": entity_names,
-            "limit": limit
-        }
-        
-        results = self._execute_query(query, parameters)
-        
-        # Format results
+        # Convert to expected format for backward compatibility
         similar_incidents = []
-        for record in results:
+        for inc in incidents:
             similar_incidents.append({
-                "incident_id": record["incident_id"],
-                "timestamp": str(record["timestamp"]) if record["timestamp"] else None,
-                "dataset": record["dataset"],
-                "label": record["label"],
-                "root_cause": record["root_cause"],
-                "root_cause_description": record["root_cause_description"],
-                "root_cause_category": record["root_cause_category"],
-                "similarity_score": record["similarity_score"],
-                "components": record["components"]
+                "incident_id": inc.get("incident_id"),
+                "timestamp": None,  # Not stored in current schema
+                "dataset": inc.get("dataset"),
+                "label": None,  # Not stored in current schema
+                "root_cause": inc.get("root_cause"),
+                "root_cause_description": inc.get("root_cause"),
+                "root_cause_category": None,  # Future enhancement
+                "similarity_score": inc.get("entity_matches", 0),
+                "components": entity_names,
+                "hypothesis": inc.get("hypothesis"),
+                "confidence": inc.get("confidence", 0.0)
             })
         
-        logger.info(f"Found {len(similar_incidents)} similar incidents")
+        logger.info(f"Found {len(similar_incidents)} similar incidents via KGQuery")
         return similar_incidents
     
     def find_causal_paths(
@@ -211,6 +194,7 @@ class KGRetrievalAgent(BaseAgent):
     ) -> List[Dict[str, Any]]:
         """
         Find causal paths leading to errors.
+        Uses KGQuery for data access.
         
         Args:
             events: List of events
@@ -220,68 +204,30 @@ class KGRetrievalAgent(BaseAgent):
         Returns:
             List of causal paths
         """
-        logger.info("Finding causal paths")
+        logger.info("Finding causal paths via KGQuery")
         
-        # Extract error types
-        error_types = list(set(e.get("error_type", "") for e in errors if e.get("error_type")))
-        
-        if not error_types:
-            logger.warning("No error types provided, skipping causal path search")
+        if not self.kg_query or not self.kg_query.driver:
+            logger.warning("KGQuery not available")
             return []
         
-        # Build Cypher query
-        query = f"""
-        // Find causal chains leading to errors
-        MATCH path = (e1:Event)-[:CAUSES*1..{max_depth}]->(e2:Event)-[:REPORTS]->(err:Error)
-        WHERE err.error_type IN $error_types
+        # Extract entity names for source/target
+        entity_names = self._extract_entity_names([], events)
         
-        // Get path details
-        WITH path, err, length(path) AS path_length
+        if len(entity_names) < 2:
+            logger.debug("Not enough entities for causal path search")
+            return []
         
-        // Extract nodes and relationships
-        UNWIND nodes(path) AS node
-        WITH path, err, path_length, collect(DISTINCT node) AS path_nodes
-        
-        UNWIND relationships(path) AS rel
-        WITH path, err, path_length, path_nodes, collect(DISTINCT rel) AS path_rels
-        
-        // Return path information
-        RETURN 
-            [n IN path_nodes | {{
-                component: n.component,
-                action: n.action,
-                timestamp: toString(n.timestamp),
-                message: n.message
-            }}] AS events,
-            [r IN path_rels | {{
-                type: type(r),
-                confidence: r.confidence,
-                delay: r.delay
-            }}] AS relationships,
-            err.error_type AS error_type,
-            err.message AS error_message,
-            path_length
-        
-        ORDER BY path_length DESC
-        LIMIT 10
-        """
-        
-        parameters = {"error_types": error_types}
-        
-        results = self._execute_query(query, parameters)
-        
-        # Format results
+        # Use KGQuery to find causal paths (currently returns empty - Week 5 feature)
         causal_paths = []
-        for record in results:
-            causal_paths.append({
-                "events": record["events"],
-                "relationships": record["relationships"],
-                "error_type": record["error_type"],
-                "error_message": record["error_message"],
-                "path_length": record["path_length"]
-            })
+        for i in range(min(len(entity_names) - 1, 3)):  # Try first 3 pairs
+            paths = self.kg_query.find_causal_paths(
+                source=entity_names[i],
+                target=entity_names[i + 1],
+                max_hops=max_depth
+            )
+            causal_paths.extend(paths)
         
-        logger.info(f"Found {len(causal_paths)} causal paths")
+        logger.info(f"Found {len(causal_paths)} causal paths via KGQuery")
         return causal_paths
     
     def get_entity_context(
@@ -290,6 +236,7 @@ class KGRetrievalAgent(BaseAgent):
     ) -> Dict[str, Any]:
         """
         Retrieve context for entities from knowledge graph.
+        Uses KGQuery for data access.
         
         Args:
             entities: List of entities
@@ -297,51 +244,32 @@ class KGRetrievalAgent(BaseAgent):
         Returns:
             Dictionary with entity context
         """
-        logger.info("Retrieving entity context")
+        logger.info("Retrieving entity context via KGQuery")
+        
+        if not self.kg_query or not self.kg_query.driver:
+            logger.warning("KGQuery not available")
+            return {}
         
         entity_names = list(set(e.get("name", "") for e in entities if e.get("name")))
         
         if not entity_names:
             return {}
         
-        # Build Cypher query
-        query = """
-        // Find entities and their relationships
-        MATCH (entity:Entity)
-        WHERE entity.name IN $entity_names
-        
-        // Find events involving this entity
-        OPTIONAL MATCH (e:Event)-[:INVOLVES]->(entity)
-        
-        // Find incidents involving this entity
-        OPTIONAL MATCH (i:Incident)-[:CONTAINS]->(e)
-        
-        // Aggregate information
-        RETURN 
-            entity.name AS name,
-            entity.type AS type,
-            entity.context AS context,
-            count(DISTINCT e) AS event_count,
-            count(DISTINCT i) AS incident_count,
-            collect(DISTINCT e.severity)[0..5] AS recent_severities
-        """
-        
-        parameters = {"entity_names": entity_names}
-        
-        results = self._execute_query(query, parameters)
-        
-        # Format results
+        # Use KGQuery to get entity information
         entity_context = {}
-        for record in results:
-            entity_context[record["name"]] = {
-                "type": record["type"],
-                "context": record["context"],
-                "event_count": record["event_count"],
-                "incident_count": record["incident_count"],
-                "recent_severities": record["recent_severities"]
-            }
+        for entity_name in entity_names:
+            info = self.kg_query.get_entity_info(entity_name)
+            if info:
+                entity_context[entity_name] = {
+                    "type": info.get("type"),
+                    "context": None,  # Not in current schema
+                    "event_count": 0,  # Not tracked in current schema
+                    "incident_count": info.get("incident_count", 0),
+                    "recent_severities": [],  # Not in current schema
+                    "datasets": info.get("datasets", [])
+                }
         
-        logger.info(f"Retrieved context for {len(entity_context)} entities")
+        logger.info(f"Retrieved context for {len(entity_context)} entities via KGQuery")
         return entity_context
     
     def get_common_patterns(
@@ -351,6 +279,7 @@ class KGRetrievalAgent(BaseAgent):
     ) -> List[Dict[str, Any]]:
         """
         Find common patterns in historical data.
+        Uses entity frequency from KGQuery.
         
         Args:
             events: List of events
@@ -359,44 +288,25 @@ class KGRetrievalAgent(BaseAgent):
         Returns:
             List of common patterns
         """
-        logger.info("Finding common patterns")
+        logger.info("Finding common patterns via KGQuery")
         
-        components = list(set(e.get("component", "") for e in events if e.get("component")))
-        
-        if not components:
+        if not self.kg_query or not self.kg_query.driver:
+            logger.warning("KGQuery not available")
             return []
         
-        # Build Cypher query
-        query = """
-        // Find common event sequences
-        MATCH (e1:Event)-[:PRECEDES]->(e2:Event)
-        WHERE e1.component IN $components OR e2.component IN $components
+        # Get all entities to find patterns
+        all_entities = self.kg_query.get_all_entities()
         
-        // Group by component pair
-        WITH e1.component AS comp1, e2.component AS comp2, count(*) AS frequency
-        WHERE frequency > 1
-        
-        RETURN comp1, comp2, frequency
-        ORDER BY frequency DESC
-        LIMIT $limit
-        """
-        
-        parameters = {
-            "components": components,
-            "limit": limit
-        }
-        
-        results = self._execute_query(query, parameters)
-        
-        # Format results
+        # Convert to pattern format
         patterns = []
-        for record in results:
+        for entity in all_entities[:limit]:
             patterns.append({
-                "pattern": f"{record['comp1']} → {record['comp2']}",
-                "frequency": record["frequency"]
+                "pattern": f"{entity['name']} ({entity['type']})",
+                "frequency": entity['incident_count'],
+                "entity_type": entity['type']
             })
         
-        logger.info(f"Found {len(patterns)} common patterns")
+        logger.info(f"Found {len(patterns)} common patterns via KGQuery")
         return patterns
     
     def _execute_query(
@@ -406,6 +316,7 @@ class KGRetrievalAgent(BaseAgent):
     ) -> List[Dict[str, Any]]:
         """
         Execute Cypher query and return results.
+        DEPRECATED: Use KGQuery methods instead.
         
         Args:
             query: Cypher query string
@@ -414,11 +325,13 @@ class KGRetrievalAgent(BaseAgent):
         Returns:
             List of result records
         """
-        if not self.driver:
+        logger.warning("_execute_query is deprecated. Use KGQuery methods instead.")
+        
+        if not self.kg_query or not self.kg_query.driver:
             return []
         
         try:
-            with self.driver.session() as session:
+            with self.kg_query.driver.session() as session:
                 result = session.run(query, parameters or {})
                 records = [dict(record) for record in result]
                 return records
@@ -430,6 +343,6 @@ class KGRetrievalAgent(BaseAgent):
     
     def close(self):
         """Close Neo4j connection."""
-        if hasattr(self, 'driver') and self.driver:
-            self.driver.close()
-            logger.info("Closed Neo4j connection")
+        if hasattr(self, 'kg_query') and self.kg_query:
+            # KGQuery handles its own connection cleanup
+            logger.info("KG Retrieval Agent closed")
