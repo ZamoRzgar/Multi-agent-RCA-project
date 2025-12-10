@@ -251,9 +251,7 @@ python src/kg/validate.py --kg data/kg/
 ## 🔬 Datasets
 
 This project uses:
-- **Alibaba System Logs**: Production system failure logs
-- **Telecom Logs**: Telecommunications infrastructure logs
-- Custom synthetic logs for controlled experiments
+- currently using loghub datasets like hadoop, hdfs, spark
 
 ## 🤝 Contributing
 
@@ -272,15 +270,13 @@ If you use this work, please cite:
 }
 ```
 
-## 📄 License
 
-[Specify your license here]
 
 ## 🙏 Acknowledgments
 
-- Based on AetherLog framework
+
 - Inspired by "Society of Minds" multi-agent debate approaches
-- Built with OpenAI GPT-4, Anthropic Claude, and Neo4j
+- Built with local models like qwen and deepseek
 
 ## 📧 Contact
 
@@ -288,4 +284,4 @@ If you use this work, please cite:
 
 ---
 
-**Status**: 🚧 Under Development - Phase 2 (System Design)
+**Status**: 🚧 Under Development
