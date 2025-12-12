@@ -113,20 +113,58 @@ class KGQuery:
         max_hops: int = 3
     ) -> List[List[Dict[str, Any]]]:
         """
-        Find causal paths between entities (future feature).
+        Find causal paths between entities through incidents.
+        
+        This finds incidents that involve both entities and returns
+        the chain of incidents that connect them.
         
         Args:
-            source: Source entity
-            target: Target entity
-            max_hops: Maximum path length
+            source: Source entity name
+            target: Target entity name
+            max_hops: Maximum number of incident hops (default 3)
             
         Returns:
-            List of causal paths
+            List of causal paths, each path is a list of incident dictionaries
         """
-        # Note: Causal relationships require temporal analysis
-        # This is a Week 5-6 feature for KG enhancement
-        logger.debug(f"Causal path finding not yet implemented (Week 5 feature)")
-        return []
+        if not self.driver or not source or not target:
+            return []
+        
+        try:
+            with self.driver.session() as session:
+                # Find paths through incidents that involve both entities
+                result = session.run("""
+                    MATCH path = (e1:Entity {name: $source})<-[:INVOLVES]-(i:Incident)-[:INVOLVES]->(e2:Entity {name: $target})
+                    WHERE e1 <> e2
+                    WITH i, e1, e2
+                    MATCH (i)-[:HAS_ROOT_CAUSE]->(rc:RootCause)
+                    RETURN i.incident_id as incident_id,
+                           i.dataset as dataset,
+                           i.final_score as score,
+                           i.final_hypothesis as hypothesis,
+                           rc.description as root_cause,
+                           rc.confidence as confidence
+                    LIMIT 10
+                """, source=source, target=target)
+                
+                paths = []
+                for record in result:
+                    path = [{
+                        'incident_id': record['incident_id'],
+                        'dataset': record['dataset'],
+                        'score': record['score'],
+                        'hypothesis': record['hypothesis'],
+                        'root_cause': record['root_cause'],
+                        'confidence': record['confidence'],
+                        'entities': [source, target]
+                    }]
+                    paths.append(path)
+                
+                logger.info(f"Found {len(paths)} causal paths from {source} to {target}")
+                return paths
+        
+        except Exception as e:
+            logger.error(f"Error finding causal paths: {e}")
+            return []
     
     def get_entity_info(self, entity_name: str) -> Optional[Dict[str, Any]]:
         """

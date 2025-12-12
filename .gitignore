@@ -108,3 +108,4 @@ scripts/validate_ground_truth.py
 tests/test_kg_retrieval.py
 .windsurf/rules/coding-rules.md
 
+docs/week5_reports/WEEK_5_PROGRESS.md

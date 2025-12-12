@@ -21,6 +21,7 @@ from src.agents.judge_agent import JudgeAgent
 from src.debate.debate_coordinator import DebateCoordinator
 from loguru import logger
 import json
+import yaml
 
 
 def print_section(title: str):
@@ -28,6 +29,20 @@ def print_section(title: str):
     print("\n" + "="*70)
     print(title)
     print("="*70)
+
+
+def load_config():
+    """Load configuration."""
+    config_path = Path(__file__).parent.parent / "config" / "config.yaml"
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    # Set Neo4j password
+    kg_config = config.get('knowledge_graph', {})
+    if kg_config.get('password') == '${NEO4J_PASSWORD}':
+        kg_config['password'] = '1997Amaterasu'
+    
+    return config
 
 
 def test_spark_scenario(scenario_id: int = 1):
@@ -77,29 +92,24 @@ def test_spark_scenario(scenario_id: int = 1):
     print(f"✓ Extracted {len(parsed_data['entities'])} entities")
     print(f"✓ Found {len(parsed_data['error_messages'])} errors")
     
-    # Step 3: KG Retrieval (using sample data for now)
+    # Step 3: KG Retrieval
     print_section("STEP 3: KNOWLEDGE GRAPH RETRIEVAL")
     
-    kg_agent = KGRetrievalAgent(
-        uri="bolt://localhost:7687",
-        username="neo4j",
-        password="1997Amaterasu"
-    )
+    # Load config for agents
+    config = load_config()
+    
+    kg_agent = KGRetrievalAgent(config=config)
     
     try:
-        kg_data = kg_agent.process({
-            "events": parsed_data["events"][:10],  # Use first 10 events
-            "entities": parsed_data["entities"][:5]
-        })
+        kg_data = kg_agent.process(parsed_data)
         
         print(f"✓ Retrieved {len(kg_data.get('similar_incidents', []))} similar incidents")
-        print(f"✓ Found {len(kg_data.get('causal_paths', []))} causal paths")
+        print(f"✓ Found {len(kg_data.get('entity_contexts', []))} entity contexts")
     except Exception as e:
         logger.warning(f"KG retrieval failed (expected if DB empty): {e}")
         kg_data = {
             "similar_incidents": [],
-            "causal_paths": [],
-            "entity_context": []
+            "entity_contexts": []
         }
     
     # Combine data for reasoners
@@ -108,15 +118,11 @@ def test_spark_scenario(scenario_id: int = 1):
     # Step 4: Run Debate Protocol
     print_section("STEP 4: DEBATE PROTOCOL")
     
-    # Initialize reasoners (they have default names and models)
-    log_reasoner = LogFocusedReasoner()
-    
-    kg_reasoner = KGFocusedReasoner()
-    
-    hybrid_reasoner = HybridReasoner()
-    
-    # Initialize judge (it also has defaults)
-    judge = JudgeAgent()
+    # Initialize reasoners with config
+    log_reasoner = LogFocusedReasoner(config=config)
+    kg_reasoner = KGFocusedReasoner(config=config)
+    hybrid_reasoner = HybridReasoner(config=config)
+    judge = JudgeAgent(config=config)
     
     # Initialize debate coordinator
     coordinator = DebateCoordinator(
@@ -147,9 +153,9 @@ def test_spark_scenario(scenario_id: int = 1):
     print("-"*70)
     
     final = results['final_hypothesis']
-    print(f"\nScore: {final['judge_score']}/100")
-    print(f"Source: {final['source']}")
-    print(f"Confidence: {final['confidence']}")
+    print(f"\nScore: {final.get('judge_score', 0)}/100")
+    print(f"Source: {final.get('source', 'N/A')}")
+    print(f"Confidence: {final.get('confidence', 'N/A')}")
     print(f"Category: {final.get('category', 'N/A')}")
     
     print(f"\nHypothesis:")

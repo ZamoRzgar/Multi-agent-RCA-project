@@ -36,6 +36,29 @@ class BaseAgent(ABC):
         self.max_tokens = max_tokens
         self.config = config or {}
         
+        # Get agent-specific model from config if available
+        agent_type_map = {
+            "LogParserAgent": "log_parser",
+            "KGRetrievalAgent": "kg_retrieval",
+            "HybridReasoner": "rca_reasoner_hybrid",
+            "LogReasoner": "rca_reasoner_log",
+            "KGReasoner": "rca_reasoner_kg",
+            "JudgeAgent": "judge"
+        }
+        
+        agent_config_key = agent_type_map.get(name)
+        if agent_config_key and "local_models" in self.config:
+            agent_config = self.config["local_models"].get(agent_config_key, {})
+            self.model = agent_config.get("model", model)
+            self.temperature = agent_config.get("temperature", temperature)
+        else:
+            # Fallback to default LLM config or provided values
+            llm_config = self.config.get("llm", {})
+            self.model = llm_config.get("model", model)
+            self.temperature = llm_config.get("temperature", temperature)
+        
+        self.max_tokens = max_tokens
+        
         logger.info(f"Initialized {self.name} with model {self.model}")
     
     @abstractmethod

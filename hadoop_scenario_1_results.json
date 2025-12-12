@@ -1,0 +1,14 @@
+{
+  "scenario_id": 1,
+  "dataset": "Hadoop",
+  "num_events": 100,
+  "total_rounds": 2,
+  "convergence": true,
+  "score_trajectory": [
+    95,
+    87
+  ],
+  "final_score": 95,
+  "final_hypothesis": "Configuration issue causing excessive task failures per node",
+  "final_source": "hybrid"
+}
