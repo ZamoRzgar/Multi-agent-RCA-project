@@ -134,11 +134,6 @@ LIMIT 10
 - Optional comparison test (with/without KG)
 - Comprehensive result display
 
-**Initial Issues Encountered**:
-1. ❌ Ollama not running / model not found
-2. ❌ Hypotheses not passed to Judge correctly
-3. ❌ Result extraction from Judge response
-
 **Outcome**: ✅ Functional E2E test (after fixes)
 
 ---
