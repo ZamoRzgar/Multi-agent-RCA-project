@@ -331,32 +331,18 @@ System Complete:  ████████░░░░░░░ 60%
 **Dates**: Dec 13-19, 2025
 
 #### Tasks
-- [ ] Measure accuracy with vs without KG
-  - [ ] Run same scenarios with KG enabled
-  - [ ] Run same scenarios with KG disabled
-  - [ ] Compare scores, confidence, correctness
-  - [ ] Document quantitative improvements
-- [ ] Ground truth validation
+- [ ] Ground truth validation (Hadoop1)
   - [ ] Use `loghub/Hadoop1/abnormal_label.txt`
-  - [ ] Validate against 54 labeled applications
-  - [ ] Calculate precision, recall, F1 score
-  - [ ] Compare with baseline methods
-- [ ] Cross-dataset testing
-  - [ ] Run all test files (Hadoop, HDFS, Spark)
-  - [ ] Collect comprehensive results
-  - [ ] Analyze performance across datasets
-  - [ ] Identify strengths and weaknesses
-- [ ] Performance optimization
-  - [ ] Profile LLM call times
-  - [ ] Optimize prompt lengths
-  - [ ] Implement KG query caching
-  - [ ] Reduce latency where possible
+  - [ ] Validate on a balanced sample (N per class)
+  - [ ] Validate against all 54 labeled applications (full run)
+  - [ ] Report strict metrics: accuracy, confusion matrix, precision/recall/F1
+  - [ ] Report coarse metrics (connectivity vs disk_full vs normal)
+  - [ ] Audit misclassifications with evidence snippets
+  - [ ] Document validation protocol (inputs, sampling, metrics)
 
 **Deliverables**:
-- [ ] Accuracy comparison report (with/without KG)
-- [ ] Ground truth validation results
-- [ ] Cross-dataset performance analysis
-- [ ] Performance optimization report
+- [ ] Hadoop1 ground truth validation results (JSON + metrics)
+- [ ] Misclassification audit notes (with evidence snippets)
 - [ ] Week 6 completion report
 
 ---

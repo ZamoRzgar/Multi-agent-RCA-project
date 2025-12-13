@@ -12,3 +12,4 @@ trigger: manual
 -Do not try to run the tests yourself tell me what to run and then I will send you the result
 -Do not create non-existant data, if you don't have the data say you don't have it and tell me we need to get it.
 -Do not make a simple version of any file always the full version.
+-Do not make any fallback mechanism always try to make things work fully. if you want to make it you have to ask me first.

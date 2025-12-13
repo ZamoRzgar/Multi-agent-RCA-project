@@ -104,8 +104,8 @@ docs/figures/score_comparison.png
 docs/figures/rounds_comparison.png
 docs/figures/summary_stats.png
 scripts/visualize_results.py
-scripts/validate_ground_truth.py
 tests/test_kg_retrieval.py
 .windsurf/rules/coding-rules.md
-
+docs/week6_validation_results/
 docs/week5_reports/WEEK_5_PROGRESS.md
+backup_for_validation_script.py
