@@ -94,3 +94,8 @@ The baseline artifacts are now generated deterministically by CLI arguments and 
   - `docs/week8_reports/WEEK_8_BASELINE_EXPERIMENTAL_REPORT.md`
 - Week 8 progress report:
   - `docs/week8_reports/WEEK_8_PROGRESS_AND_ACHIEVEMENTS.md`
+
+
+
+## 7. Next Steps
+- may do RAG and CoT baseline test later or not (this is just for a reminder to not forget)
