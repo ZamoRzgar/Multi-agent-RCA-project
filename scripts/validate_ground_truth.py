@@ -18,6 +18,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.agents.base_agent import BaseAgent
 from src.agents.kg_retrieval import KGRetrievalAgent
 from src.agents.rca_log_reasoner import LogFocusedReasoner
 from src.agents.rca_kg_reasoner import KGFocusedReasoner
@@ -83,6 +84,104 @@ EXPECTED_CATEGORIES = {
         'rare': ['storage']
     }
 }
+
+class SingleAgentBaselineAgent(BaseAgent):
+    def __init__(self, model: str = '', temperature: float = 0.3, max_tokens: int = 1400, **kwargs):
+        provided_model = model
+        super().__init__(
+            name='SingleAgentBaseline',
+            model=provided_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        if provided_model:
+            self.model = provided_model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+
+    def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        prompt = self._build_prompt(input_data)
+        response = self._call_llm(prompt)
+        parsed = self._parse_response(response)
+        hypothesis = parsed.get('hypothesis', '') or ''
+        if not hypothesis and response:
+            hypothesis = response.strip()
+        category = parsed.get('category', '') or 'unknown'
+        return {
+            'hypothesis': hypothesis,
+            'category': category,
+            'confidence': parsed.get('confidence', None),
+            'suggested_resolution': parsed.get('suggested_resolution', ''),
+            'source': 'single_agent',
+            'raw_response': response,
+        }
+
+    def _build_prompt(self, input_data: Dict[str, Any]) -> str:
+        raw_logs = input_data.get('raw_logs', '') or ''
+        raw_excerpt = raw_logs[:12000]
+
+        errors = input_data.get('error_messages', []) or []
+        errors_excerpt = errors[:40]
+        error_lines = []
+        for e in errors_excerpt:
+            msg = e.get('message', '') if isinstance(e, dict) else str(e)
+            if msg:
+                error_lines.append(f"- {msg}")
+
+        entities = input_data.get('entities', []) or []
+        entity_vals = []
+        for ent in entities[:30]:
+            if isinstance(ent, dict):
+                v = ent.get('value') or ent.get('component') or ''
+                if v:
+                    entity_vals.append(str(v))
+            else:
+                entity_vals.append(str(ent))
+
+        entity_text = ', '.join(entity_vals[:30])
+        error_text = '\n'.join(error_lines) if error_lines else '- (none)'
+
+        return (
+            "You are an SRE root-cause analyst. Given Hadoop/YARN container logs, infer the most likely root cause. "
+            "Return ONLY a JSON object with keys: hypothesis (string), category (string), confidence (number 0..1), suggested_resolution (string).\n\n"
+            "Allowed category values: network, disk, hardware, resource, configuration, application, unknown.\n\n"
+            f"Known entities/components: {entity_text if entity_text else '(none)'}\n\n"
+            f"Top error-like messages (may be incomplete):\n{error_text}\n\n"
+            "Log excerpt (truncated):\n"
+            f"{raw_excerpt}"
+        )
+
+    def _parse_response(self, text: str) -> Dict[str, Any]:
+        if not text:
+            return {}
+        cleaned = text.strip()
+        m = re.search(r"\{.*\}", cleaned, re.S)
+        payload = m.group(0) if m else cleaned
+        try:
+            obj = json.loads(payload)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+
+        out: Dict[str, Any] = {}
+        hyp_m = re.search(r"hypothesis\s*[:=]\s*(.*)", cleaned, re.I)
+        if hyp_m:
+            out['hypothesis'] = hyp_m.group(1).strip().strip('"')
+        cat_m = re.search(r"category\s*[:=]\s*(.*)", cleaned, re.I)
+        if cat_m:
+            out['category'] = cat_m.group(1).strip().strip('"')
+        conf_m = re.search(r"confidence\s*[:=]\s*([0-9.]+)", cleaned, re.I)
+        if conf_m:
+            try:
+                out['confidence'] = float(conf_m.group(1))
+            except Exception:
+                pass
+        res_m = re.search(r"suggested_resolution\s*[:=]\s*(.*)", cleaned, re.I)
+        if res_m:
+            out['suggested_resolution'] = res_m.group(1).strip().strip('"')
+        return out
 
 class GroundTruthValidator:
     def __init__(self):
@@ -445,8 +544,14 @@ class GroundTruthValidator:
         app_ids: List[str],
         max_lines: int = 2500,
         max_files: int = 6,
+        pipeline: str = 'multi_agent',
+        single_agent_model: str = '',
     ) -> List[Dict[str, Any]]:
         config = self.load_config()
+
+        single_agent = None
+        if pipeline == 'single_agent':
+            single_agent = SingleAgentBaselineAgent(config=config, model=single_agent_model)
 
         out = []
         for app_id in app_ids:
@@ -456,9 +561,13 @@ class GroundTruthValidator:
             indicator_scores = self._score_log_indicators(raw_text)
             indicator_best = self._best_indicator_type(indicator_scores)
             parsed_data = self._build_parsed_data_from_raw_text(raw_text)
-            results = self._run_rca_pipeline(parsed_data, config)
 
-            final = results.get('final_hypothesis') or {}
+            if pipeline == 'single_agent' and single_agent is not None:
+                final = single_agent.process(parsed_data) or {}
+            else:
+                results = self._run_rca_pipeline(parsed_data, config)
+                final = results.get('final_hypothesis') or {}
+
             predicted_category = final.get('category', '')
             predicted_text = final.get('hypothesis', '')
             predicted_type = self._normalize_predicted_category(predicted_category, predicted_text)
@@ -473,6 +582,7 @@ class GroundTruthValidator:
             row = {
                 'dataset': 'Hadoop1',
                 'application_id': app_id,
+                'pipeline': pipeline,
                 'ground_truth': gt_label,
                 'predicted_category': predicted_category,
                 'predicted_failure_type': predicted_final,
@@ -484,6 +594,7 @@ class GroundTruthValidator:
                 'final_score': final.get('judge_score', None),
                 'confidence': final.get('confidence', None),
                 'hypothesis': predicted_text,
+                'single_agent_raw_response': final.get('raw_response', None) if pipeline == 'single_agent' else None,
                 'indicator_scores': indicator_scores,
                 'evidence_snippet': evidence_snippet,
             }
@@ -765,6 +876,10 @@ def main():
     parser.add_argument('--apps', type=str, default='')
     parser.add_argument('--max-lines', type=int, default=2500)
     parser.add_argument('--max-files', type=int, default=6)
+    parser.add_argument('--pipeline', choices=['multi_agent', 'single_agent'], default='multi_agent')
+    parser.add_argument('--single-agent-model', type=str, default='')
+    parser.add_argument('--output-results', type=str, default='')
+    parser.add_argument('--output-metrics', type=str, default='')
     args = parser.parse_args()
 
     validator = GroundTruthValidator()
@@ -788,7 +903,13 @@ def main():
     else:
         app_ids = sorted(labels.keys())[: max(1, args.max_apps)]
 
-    results = validator.validate_hadoop1_applications(app_ids, max_lines=args.max_lines, max_files=args.max_files)
+    results = validator.validate_hadoop1_applications(
+        app_ids,
+        max_lines=args.max_lines,
+        max_files=args.max_files,
+        pipeline=args.pipeline,
+        single_agent_model=args.single_agent_model,
+    )
 
     strict_labels = ['normal', 'machine_down', 'network_disconnection', 'disk_full']
     strict_metrics = validator.compute_metrics(
@@ -807,7 +928,7 @@ def main():
     )
 
     print("\n" + "="*70)
-    print("HADOOP1 GROUND TRUTH VALIDATION")
+    print("HADOOP1 GROUND TRUTH VALIDATION" + (" (SINGLE-AGENT BASELINE)" if args.pipeline == 'single_agent' else ""))
     print("="*70)
     print(f"Applications evaluated: {len(results)}")
     print(f"Sampling: apps={len(app_ids)} balanced_per_class={args.balanced_per_class} all={args.all} seed={args.seed}")
@@ -826,13 +947,15 @@ def main():
     for cls, stats in coarse_metrics['per_class'].items():
         print(f"  {cls}: P={stats['precision']*100:.1f}% R={stats['recall']*100:.1f}% F1={stats['f1']*100:.1f}% (n={stats['support']})")
 
-    output_file = Path('docs') / 'HADOOP1_GROUND_TRUTH_RESULTS.json'
+    default_results_name = 'HADOOP1_GROUND_TRUTH_RESULTS.json' if args.pipeline == 'multi_agent' else 'HADOOP1_SINGLE_AGENT_RESULTS.json'
+    output_file = Path(args.output_results) if args.output_results.strip() else (Path('docs') / default_results_name)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with output_file.open('w') as f:
         json.dump(results, f, indent=2)
     print(f"\n✓ Detailed results saved to: {output_file}")
 
-    metrics_file = Path('docs') / 'HADOOP1_GROUND_TRUTH_METRICS.json'
+    default_metrics_name = 'HADOOP1_GROUND_TRUTH_METRICS.json' if args.pipeline == 'multi_agent' else 'HADOOP1_SINGLE_AGENT_METRICS.json'
+    metrics_file = Path(args.output_metrics) if args.output_metrics.strip() else (Path('docs') / default_metrics_name)
     with metrics_file.open('w') as f:
         json.dump({
             'strict': strict_metrics,
@@ -846,6 +969,10 @@ def main():
                 'apps': args.apps,
                 'max_lines': args.max_lines,
                 'max_files': args.max_files,
+                'pipeline': args.pipeline,
+                'single_agent_model': args.single_agent_model,
+                'output_results': str(output_file),
+                'output_metrics': str(metrics_file),
             }
         }, f, indent=2)
     print(f"✓ Metrics saved to: {metrics_file}")

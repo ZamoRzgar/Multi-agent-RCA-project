@@ -109,3 +109,5 @@ tests/test_kg_retrieval.py
 docs/week6_validation_results/
 docs/week5_reports/WEEK_5_PROGRESS.md
 backup_for_validation_script.py
+validate_ground_truth_backup_working_week6.py
+docs/week8_validation_results/
