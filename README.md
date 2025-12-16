@@ -1,4 +1,4 @@
-# AetherLog 2.0: Multi-Agent Knowledge-Graph-Guided RCA System
+# Multi-Agent Knowledge-Graph-Guided RCA System
 
 A novel multi-agent framework for reliable log-based root cause analysis (RCA) using Large Language Models and knowledge graphs. This system addresses hallucinations and tunnel vision in single-LLM approaches through collaborative agent debate and structured reasoning.
 
@@ -9,7 +9,7 @@ Single-LLM systems for root cause analysis often suffer from:
 - **Tunnel vision**: Missing alternative explanations and causal chains
 - **Limited reasoning**: Inability to cross-check hypotheses against multiple perspectives
 
-**AetherLog 2.0** solves these problems through:
+**Multi Agent** solves these problems through:
 - **Multi-agent collaboration**: Specialized agents with different analytical perspectives
 - **Knowledge graph grounding**: Shared memory of historical incidents and causal relationships
 - **Structured debate**: Agents critique, refine, and converge on accurate explanations
@@ -68,7 +68,7 @@ Single-LLM systems for root cause analysis often suffer from:
          └────────────────────────┘
 ```
 
-## 📁 Project Structure
+## 📁 Project Structure (Changed)
 
 ```
 log/
@@ -119,7 +119,7 @@ log/
 
 - Python 3.9+
 - Neo4j 5.0+ (for knowledge graph storage)
-- OpenAI API key or Anthropic API key
+
 
 ### Installation
 
@@ -208,28 +208,7 @@ print(f"Root Cause: {result.root_cause}")
 print(f"Explanation: {result.explanation}")
 ```
 
-### Running Experiments
 
-```bash
-# Run full evaluation
-python experiments/run_evaluation.py --config config/config.yaml
-
-# Run specific baseline
-python experiments/run_baseline.py --method single_llm_with_kg
-
-# Run ablation study
-python experiments/run_ablation.py --ablation no_debate
-```
-
-### Building Knowledge Graph
-
-```bash
-# Build KG from historical logs
-python src/kg/builder.py --input data/raw/historical_logs/ --output data/kg/
-
-# Validate KG
-python src/kg/validate.py --kg data/kg/
-```
 
 ## 📈 Evaluation Metrics
 
@@ -257,18 +236,7 @@ This project uses:
 
 This is a research project. For collaboration inquiries, please contact the project maintainer.
 
-## 📝 Citation
 
-If you use this work, please cite:
-
-```bibtex
-@article{aetherlog2024,
-  title={Multi-Agent Knowledge-Graph-Guided Reasoning for Reliable Log-Based Root Cause Analysis},
-  author={Your Name},
-  journal={arXiv preprint},
-  year={2024}
-}
-```
 
 
 
@@ -278,10 +246,5 @@ If you use this work, please cite:
 - Inspired by "Society of Minds" multi-agent debate approaches
 - Built with local models like qwen and deepseek
 
-## 📧 Contact
-
-[Your contact information]
-
----
 
 **Status**: 🚧 Under Development
