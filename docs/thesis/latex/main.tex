@@ -595,22 +595,98 @@ Both systems achieve identical coarse accuracy (61.8\%), but this masks fundamen
 
 The key insight is that \textbf{accuracy alone is misleading for imbalanced datasets}. The multi-agent system's superior macro-\fone{} (39.1\% vs 25.8\%) reflects its ability to detect minority classes, which is more valuable in practice than simply predicting the majority class.
 
-\section{Limitations}
+\section{Limitations and Detailed Analysis}
+
+\subsection{Dataset Scale Limitation}
+
+The primary evaluation relies on the Hadoop1 dataset with only 55 labeled applications. While this is a standard benchmark from LogHub, the small sample size limits statistical power and generalizability. The class distribution is also imbalanced:
+
+\begin{itemize}
+    \item \texttt{machine\_down}: 28 samples (50.9\%)
+    \item \texttt{normal}: 11 samples (20.0\%)
+    \item \texttt{disk\_full}: 9 samples (16.4\%)
+    \item \texttt{network\_disconnection}: 7 samples (12.7\%)
+\end{itemize}
+
+\textbf{Mitigation}: We report macro-averaged metrics to avoid bias toward majority classes, and we conducted cross-dataset testing on HDFS, Hadoop, and Spark (9 additional scenarios) to assess generalization.
+
+\subsection{Normal Class Detection (0\% \fone{}): Concrete Analysis}
+
+Both systems achieve 0\% \fone{} on the ``normal'' class. This is not a system failure but a \textbf{dataset labeling issue}. Examination of logs labeled as ``normal'' reveals they contain error patterns indistinguishable from failure cases:
+
+\begin{lstlisting}[basicstyle=\ttfamily\scriptsize,frame=single,caption={Example log from ``normal'' labeled application}]
+2015-10-18 18:15:09,449 WARN [main] org.apache.hadoop.hdfs.server.
+    datanode.DataNode: Problem connecting to server: master:8020
+2015-10-18 18:15:10,112 ERROR [IPC Client] connection to master
+    failed on connection exception: java.net.ConnectException
+2015-10-18 18:15:11,847 WARN [RPC] Retrying connect to server
+\end{lstlisting}
+
+These logs show connection errors, warnings, and retry attempts---patterns that any reasonable RCA system would classify as indicating a problem. The ``normal'' label in Hadoop1 means ``no fault was \textit{injected},'' not ``the system operated without errors.'' This semantic mismatch makes normal detection fundamentally ambiguous from logs alone.
+
+\textbf{Recommendation}: Future work should incorporate external signals (job success/failure status, exit codes) or use datasets with cleaner normal/abnormal separation.
+
+\subsection{Disk Full Recall (22.2\%): Detailed Analysis}
+
+The multi-agent system detects disk\_full with 100\% precision but only 22.2\% recall (2/9 samples). Analysis of misclassified disk\_full cases reveals:
 
 \begin{enumerate}
-    \item \textbf{Normal Detection}: 0\% \fone{} on normal class (dataset issue: ``normal'' runs contain errors)
-    \item \textbf{Disk Full Recall}: Only 22.2\% recall suggests need for stronger disk-related pattern recognition
-    \item \textbf{Single Dataset}: Primary evaluation on Hadoop1 only
-    \item \textbf{No Statistical Tests}: Bootstrap confidence intervals not computed
-    \item \textbf{Single Baseline}: Only compared against single-agent LLM
+    \item \textbf{Symptom overlap}: Disk exhaustion often causes secondary connection failures as nodes become unresponsive, leading to connectivity-like log patterns.
+    \item \textbf{Sparse disk-specific keywords}: Only 2/9 disk\_full applications contained explicit ``No space left on device'' messages in the sampled log lines.
+    \item \textbf{Sampling limitation}: We sample up to 2500 lines per application; disk-related errors may appear in unsampled portions.
 \end{enumerate}
+
+\textbf{Recommendation}: Implement disk-specific keyword boosting in log sampling, or use a two-stage classifier (first detect disk keywords, then apply RCA).
+
+\subsection{Baseline Comparison Scope}
+
+The current evaluation compares only against a single-agent LLM baseline. While this demonstrates the value of multi-agent debate, stronger baselines would provide more context:
+
+\begin{itemize}
+    \item \textbf{Chain-of-Thought (CoT)}: Single LLM with explicit reasoning steps
+    \item \textbf{Retrieval-Augmented Generation (RAG)}: Single LLM with retrieved examples
+    \item \textbf{Traditional ML}: Random Forest, SVM on log features (TF-IDF, n-grams)
+    \item \textbf{Deep Learning}: DeepLog, LogAnomaly neural approaches
+\end{itemize}
+
+These are acknowledged as future work due to time constraints.
+
+\subsection{Cross-Dataset Evaluation Metrics}
+
+The cross-dataset evaluation (Table~\ref{tab:crossdataset}) uses different metrics than the Hadoop1 ground truth evaluation:
+
+\begin{itemize}
+    \item \textbf{Hadoop1 evaluation}: Classification accuracy, precision, recall, \fone{} against ground truth labels
+    \item \textbf{Cross-dataset evaluation}: Judge scores (0-100), convergence rate, winner distribution
+\end{itemize}
+
+\textbf{Rationale}: The cross-dataset scenarios (HDFS, Hadoop, Spark) lack ground truth labels for failure types. Instead, we measure \textit{internal quality}---whether the debate protocol produces high-scoring, converged hypotheses. This complements the Hadoop1 evaluation, which measures \textit{external validity} against known labels.
+
+The 91.1/100 average score and 100\% convergence rate demonstrate that the debate protocol consistently produces well-reasoned hypotheses, even if we cannot verify their correctness without labels.
 
 \section{Threats to Validity}
 
 \begin{description}
-    \item[Internal:] Heuristic label mapping, LLM variability, configuration sensitivity
-    \item[External:] Dataset representativeness, log format dependency, scale
-    \item[Construct:] Metric choice, coarse vs strict reporting, ground truth quality
+    \item[Internal Validity:] 
+    \begin{itemize}
+        \item Heuristic label mapping from free-text predictions to ground truth categories
+        \item LLM output variability across runs (mitigated by low temperature for judge)
+        \item Configuration sensitivity (model choice, temperature, max tokens)
+    \end{itemize}
+    
+    \item[External Validity:]
+    \begin{itemize}
+        \item Single primary dataset (Hadoop1) limits generalizability
+        \item Log format dependency---system may not transfer to non-Hadoop logs
+        \item Scale---55 samples insufficient for production deployment claims
+    \end{itemize}
+    
+    \item[Construct Validity:]
+    \begin{itemize}
+        \item Accuracy vs macro-\fone{} choice affects interpretation
+        \item Coarse vs strict evaluation schemes yield different conclusions
+        \item Ground truth quality---``normal'' labels are semantically ambiguous
+    \end{itemize}
 \end{description}
 
 %==============================================================================
