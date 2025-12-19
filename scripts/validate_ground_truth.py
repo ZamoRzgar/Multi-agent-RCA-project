@@ -183,6 +183,169 @@ class SingleAgentBaselineAgent(BaseAgent):
             out['suggested_resolution'] = res_m.group(1).strip().strip('"')
         return out
 
+
+class RAGBaselineAgent(BaseAgent):
+    """
+    RAG (Retrieval-Augmented Generation) baseline agent.
+    Retrieves similar historical incidents from KG and uses them as context for LLM prediction.
+    """
+    def __init__(self, model: str = '', temperature: float = 0.3, max_tokens: int = 2000, **kwargs):
+        provided_model = model
+        super().__init__(
+            name='RAGBaseline',
+            model=provided_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        if provided_model:
+            self.model = provided_model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        
+        # Initialize KG retrieval for RAG
+        self.kg_retrieval = None
+        try:
+            config = kwargs.get('config', {})
+            self.kg_retrieval = KGRetrievalAgent(config=config)
+        except Exception as e:
+            print(f"Warning: Could not initialize KG for RAG: {e}")
+
+    def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        # Step 1: Retrieve similar incidents from KG
+        retrieved_context = self._retrieve_context(input_data)
+        
+        # Step 2: Build prompt with retrieved context
+        prompt = self._build_prompt(input_data, retrieved_context)
+        
+        # Step 3: Call LLM
+        response = self._call_llm(prompt)
+        
+        # Step 4: Parse response
+        parsed = self._parse_response(response)
+        hypothesis = parsed.get('hypothesis', '') or ''
+        if not hypothesis and response:
+            hypothesis = response.strip()
+        category = parsed.get('category', '') or 'unknown'
+        
+        return {
+            'hypothesis': hypothesis,
+            'category': category,
+            'confidence': parsed.get('confidence', None),
+            'suggested_resolution': parsed.get('suggested_resolution', ''),
+            'source': 'rag_baseline',
+            'raw_response': response,
+            'retrieved_incidents': len(retrieved_context.get('similar_incidents', [])),
+        }
+
+    def _retrieve_context(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Retrieve similar incidents from knowledge graph."""
+        if not self.kg_retrieval:
+            return {'similar_incidents': [], 'entity_context': {}}
+        
+        try:
+            kg_facts = self.kg_retrieval.process(input_data)
+            return kg_facts
+        except Exception as e:
+            print(f"Warning: KG retrieval failed: {e}")
+            return {'similar_incidents': [], 'entity_context': {}}
+
+    def _build_prompt(self, input_data: Dict[str, Any], retrieved_context: Dict[str, Any]) -> str:
+        raw_logs = input_data.get('raw_logs', '') or ''
+        raw_excerpt = raw_logs[:10000]
+
+        errors = input_data.get('error_messages', []) or []
+        errors_excerpt = errors[:40]
+        error_lines = []
+        for e in errors_excerpt:
+            msg = e.get('message', '') if isinstance(e, dict) else str(e)
+            if msg:
+                error_lines.append(f"- {msg}")
+
+        entities = input_data.get('entities', []) or []
+        entity_vals = []
+        for ent in entities[:30]:
+            if isinstance(ent, dict):
+                v = ent.get('value') or ent.get('component') or ''
+                if v:
+                    entity_vals.append(str(v))
+            else:
+                entity_vals.append(str(ent))
+
+        entity_text = ', '.join(entity_vals[:30])
+        error_text = '\n'.join(error_lines) if error_lines else '- (none)'
+
+        # Format retrieved incidents as context
+        similar_incidents = retrieved_context.get('similar_incidents', [])
+        retrieved_text = self._format_retrieved_incidents(similar_incidents)
+
+        return (
+            "You are an SRE root-cause analyst. Given Hadoop/YARN container logs and similar historical incidents, "
+            "infer the most likely root cause.\n\n"
+            "Return ONLY a JSON object with keys: hypothesis (string), category (string), confidence (number 0..1), suggested_resolution (string).\n\n"
+            "Allowed category values: network, disk, hardware, resource, configuration, application, unknown.\n\n"
+            f"=== SIMILAR HISTORICAL INCIDENTS (from knowledge base) ===\n{retrieved_text}\n\n"
+            f"=== CURRENT INCIDENT ===\n"
+            f"Known entities/components: {entity_text if entity_text else '(none)'}\n\n"
+            f"Top error-like messages (may be incomplete):\n{error_text}\n\n"
+            "Log excerpt (truncated):\n"
+            f"{raw_excerpt}"
+        )
+
+    def _format_retrieved_incidents(self, incidents: List[Dict[str, Any]]) -> str:
+        """Format retrieved incidents for prompt context."""
+        if not incidents:
+            return "(No similar historical incidents found)"
+        
+        lines = []
+        for i, inc in enumerate(incidents[:5], 1):  # Top 5 incidents
+            incident_id = inc.get('incident_id', 'unknown')
+            dataset = inc.get('dataset', 'unknown')
+            root_cause = inc.get('root_cause', 'unknown')
+            hypothesis = inc.get('hypothesis', '')
+            confidence = inc.get('confidence', 0)
+            
+            lines.append(f"Incident {i}: [{dataset}] {incident_id}")
+            lines.append(f"  Root Cause: {root_cause}")
+            if hypothesis:
+                lines.append(f"  Hypothesis: {hypothesis[:200]}...")
+            lines.append(f"  Confidence: {confidence:.2f}")
+            lines.append("")
+        
+        return '\n'.join(lines)
+
+    def _parse_response(self, text: str) -> Dict[str, Any]:
+        if not text:
+            return {}
+        cleaned = text.strip()
+        m = re.search(r"\{.*\}", cleaned, re.S)
+        payload = m.group(0) if m else cleaned
+        try:
+            obj = json.loads(payload)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+
+        out: Dict[str, Any] = {}
+        hyp_m = re.search(r"hypothesis\s*[:=]\s*(.*)", cleaned, re.I)
+        if hyp_m:
+            out['hypothesis'] = hyp_m.group(1).strip().strip('"')
+        cat_m = re.search(r"category\s*[:=]\s*(.*)", cleaned, re.I)
+        if cat_m:
+            out['category'] = cat_m.group(1).strip().strip('"')
+        conf_m = re.search(r"confidence\s*[:=]\s*([0-9.]+)", cleaned, re.I)
+        if conf_m:
+            try:
+                out['confidence'] = float(conf_m.group(1))
+            except Exception:
+                pass
+        res_m = re.search(r"suggested_resolution\s*[:=]\s*(.*)", cleaned, re.I)
+        if res_m:
+            out['suggested_resolution'] = res_m.group(1).strip().strip('"')
+        return out
+
+
 class GroundTruthValidator:
     def __init__(self):
         self.results = []
@@ -550,8 +713,11 @@ class GroundTruthValidator:
         config = self.load_config()
 
         single_agent = None
+        rag_agent = None
         if pipeline == 'single_agent':
             single_agent = SingleAgentBaselineAgent(config=config, model=single_agent_model)
+        elif pipeline == 'rag':
+            rag_agent = RAGBaselineAgent(config=config, model=single_agent_model)
 
         out = []
         for app_id in app_ids:
@@ -564,6 +730,8 @@ class GroundTruthValidator:
 
             if pipeline == 'single_agent' and single_agent is not None:
                 final = single_agent.process(parsed_data) or {}
+            elif pipeline == 'rag' and rag_agent is not None:
+                final = rag_agent.process(parsed_data) or {}
             else:
                 results = self._run_rca_pipeline(parsed_data, config)
                 final = results.get('final_hypothesis') or {}
@@ -876,7 +1044,7 @@ def main():
     parser.add_argument('--apps', type=str, default='')
     parser.add_argument('--max-lines', type=int, default=2500)
     parser.add_argument('--max-files', type=int, default=6)
-    parser.add_argument('--pipeline', choices=['multi_agent', 'single_agent'], default='multi_agent')
+    parser.add_argument('--pipeline', choices=['multi_agent', 'single_agent', 'rag'], default='multi_agent')
     parser.add_argument('--single-agent-model', type=str, default='')
     parser.add_argument('--output-results', type=str, default='')
     parser.add_argument('--output-metrics', type=str, default='')
@@ -928,7 +1096,8 @@ def main():
     )
 
     print("\n" + "="*70)
-    print("HADOOP1 GROUND TRUTH VALIDATION" + (" (SINGLE-AGENT BASELINE)" if args.pipeline == 'single_agent' else ""))
+    pipeline_label = {"multi_agent": "", "single_agent": " (SINGLE-AGENT BASELINE)", "rag": " (RAG BASELINE)"}
+    print("HADOOP1 GROUND TRUTH VALIDATION" + pipeline_label.get(args.pipeline, ""))
     print("="*70)
     print(f"Applications evaluated: {len(results)}")
     print(f"Sampling: apps={len(app_ids)} balanced_per_class={args.balanced_per_class} all={args.all} seed={args.seed}")
@@ -947,14 +1116,24 @@ def main():
     for cls, stats in coarse_metrics['per_class'].items():
         print(f"  {cls}: P={stats['precision']*100:.1f}% R={stats['recall']*100:.1f}% F1={stats['f1']*100:.1f}% (n={stats['support']})")
 
-    default_results_name = 'HADOOP1_GROUND_TRUTH_RESULTS.json' if args.pipeline == 'multi_agent' else 'HADOOP1_SINGLE_AGENT_RESULTS.json'
+    results_name_map = {
+        'multi_agent': 'HADOOP1_GROUND_TRUTH_RESULTS.json',
+        'single_agent': 'HADOOP1_SINGLE_AGENT_RESULTS.json',
+        'rag': 'HADOOP1_RAG_RESULTS.json',
+    }
+    default_results_name = results_name_map.get(args.pipeline, 'HADOOP1_GROUND_TRUTH_RESULTS.json')
     output_file = Path(args.output_results) if args.output_results.strip() else (Path('docs') / default_results_name)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with output_file.open('w') as f:
         json.dump(results, f, indent=2)
     print(f"\n✓ Detailed results saved to: {output_file}")
 
-    default_metrics_name = 'HADOOP1_GROUND_TRUTH_METRICS.json' if args.pipeline == 'multi_agent' else 'HADOOP1_SINGLE_AGENT_METRICS.json'
+    metrics_name_map = {
+        'multi_agent': 'HADOOP1_GROUND_TRUTH_METRICS.json',
+        'single_agent': 'HADOOP1_SINGLE_AGENT_METRICS.json',
+        'rag': 'HADOOP1_RAG_METRICS.json',
+    }
+    default_metrics_name = metrics_name_map.get(args.pipeline, 'HADOOP1_GROUND_TRUTH_METRICS.json')
     metrics_file = Path(args.output_metrics) if args.output_metrics.strip() else (Path('docs') / default_metrics_name)
     with metrics_file.open('w') as f:
         json.dump({

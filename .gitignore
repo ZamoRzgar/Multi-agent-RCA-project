@@ -111,3 +111,6 @@ docs/week5_reports/WEEK_5_PROGRESS.md
 backup_for_validation_script.py
 validate_ground_truth_backup_working_week6.py
 docs/week8_validation_results/
+docs/RAG_results/
+docs/HADOOP1_GROUND_TRUTH_METRICS.json
+docs/HADOOP1_GROUND_TRUTH_RESULTS.json

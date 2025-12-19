@@ -96,7 +96,7 @@ Modern distributed systems generate massive volumes of log data critical for dia
 
 This thesis presents \systemname{}, a multi-agent knowledge-graph-guided root cause analysis system. The system comprises six specialized agents: a Log Parser for structured extraction, a KG Retrieval Agent for historical context, three RCA Reasoners (Log-focused, KG-focused, and Hybrid), and a Judge Agent for hypothesis evaluation. These agents collaborate through a structured debate protocol enabling iterative hypothesis refinement and cross-validation.
 
-We evaluate on the Hadoop1 dataset (55 labeled applications with 4 failure types) comparing against a single-agent LLM baseline. Results demonstrate that the multi-agent approach achieves: \textbf{+13.3 percentage points} improvement in coarse macro-\fone{} (39.1\% vs 25.8\%), \textbf{+36.4 percentage points} improvement in disk\_full detection (36.4\% \fone{} vs 0\%), \textbf{81.0\% \fone{}} on connectivity-related failures, and \textbf{100\% convergence rate} in the debate protocol.
+We evaluate on the Hadoop1 dataset (55 labeled applications with 4 failure types) comparing against single-agent LLM and RAG (Retrieval-Augmented Generation) baselines. Results demonstrate that the multi-agent approach achieves: \textbf{+13.3 percentage points} improvement in coarse macro-\fone{} over single-agent (39.1\% vs 25.8\%), \textbf{+36.4 percentage points} improvement in disk\_full detection (36.4\% \fone{} vs 0\%), \textbf{81.0\% \fone{}} on connectivity-related failures, and \textbf{100\% convergence rate} in the debate protocol. The RAG baseline achieves 67.3\% coarse accuracy (highest) but lower macro-\fone{} than multi-agent (37.9\% vs 39.1\%), demonstrating that debate provides value beyond simple retrieval.
 
 \textbf{Keywords:} Root Cause Analysis, Multi-Agent Systems, Large Language Models, Knowledge Graphs, Log Analysis, Distributed Systems
 \end{abstract}
@@ -270,20 +270,26 @@ We evaluate using both \textbf{strict} (4-class) and \textbf{coarse} (3-class) l
 
 \section{Baseline Comparison}
 
+We compare our multi-agent system against two baselines:
+\begin{enumerate}
+    \item \textbf{Single-Agent LLM}: A single LLM call with log context only, no KG retrieval or debate.
+    \item \textbf{RAG (Retrieval-Augmented Generation)}: Single LLM call augmented with similar historical incidents retrieved from the Knowledge Graph.
+\end{enumerate}
+
 \begin{table}[H]
 \centering
 \caption{System Comparison}
 \label{tab:systems}
-\begin{tabular}{lll}
+\begin{tabular}{llll}
 \toprule
-\textbf{Aspect} & \textbf{Multi-Agent} & \textbf{Single-Agent} \\
+\textbf{Aspect} & \textbf{Multi-Agent} & \textbf{RAG} & \textbf{Single-Agent} \\
 \midrule
-LLM Calls per app & 8--15 & 1 \\
-Perspectives & 3 (Log, KG, Hybrid) & 1 \\
-KG Integration & Yes & No \\
-Debate/Refinement & Yes (2--3 rounds) & No \\
-Cross-Validation & Yes (Judge) & No \\
-Runtime per app & 3--5 minutes & 30 seconds \\
+LLM Calls per app & 8--15 & 1 & 1 \\
+Perspectives & 3 (Log, KG, Hybrid) & 1 & 1 \\
+KG Integration & Yes & Yes (retrieval only) & No \\
+Debate/Refinement & Yes (2--3 rounds) & No & No \\
+Cross-Validation & Yes (Judge) & No & No \\
+Runtime per app & 3--5 minutes & 30--45 seconds & 30 seconds \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -485,32 +491,105 @@ disk\_full & 9 & 0.0\% & 0.0\% & 0.0\% \\
 \end{tabular}
 \end{table}
 
+\section{RAG Baseline Results}
+
+The RAG (Retrieval-Augmented Generation) baseline retrieves similar historical incidents from the Knowledge Graph and includes them as context for the LLM prediction.
+
+\subsection{Strict (4-class) Evaluation}
+
+\begin{table}[H]
+\centering
+\caption{RAG Baseline Strict Evaluation Results}
+\label{tab:rag-strict}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Accuracy & 49.1\% (27/55) \\
+Macro Precision & 29.4\% \\
+Macro Recall & 27.9\% \\
+Macro \fone{} & 24.6\% \\
+Unknown Predictions & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{RAG Baseline Per-Class Results (Strict)}
+\label{tab:rag-strict-perclass}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Class} & \textbf{Support} & \textbf{Precision} & \textbf{Recall} & \textbf{\fone{}} \\
+\midrule
+normal & 11 & 0.0\% & 0.0\% & 0.0\% \\
+machine\_down & 28 & 51.0\% & 89.3\% & 64.9\% \\
+network\_disconnection & 7 & 0.0\% & 0.0\% & 0.0\% \\
+disk\_full & 9 & 66.7\% & 22.2\% & 33.3\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Coarse (3-class) Evaluation}
+
+\begin{table}[H]
+\centering
+\caption{RAG Baseline Coarse Evaluation Results}
+\label{tab:rag-coarse}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Accuracy & 67.3\% (37/55) \\
+Macro Precision & 44.7\% \\
+Macro Recall & 40.7\% \\
+Macro \fone{} & 37.9\% \\
+Unknown Predictions & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{RAG Baseline Per-Class Results (Coarse)}
+\label{tab:rag-coarse-perclass}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Class} & \textbf{Support} & \textbf{Precision} & \textbf{Recall} & \textbf{\fone{}} \\
+\midrule
+normal & 11 & 0.0\% & 0.0\% & 0.0\% \\
+connectivity & 35 & 67.3\% & 100.0\% & 80.5\% \\
+disk\_full & 9 & 66.7\% & 22.2\% & 33.3\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \section{Comparative Analysis}
 
 \begin{table}[H]
 \centering
-\caption{Comparative Summary: Multi-Agent vs Single-Agent}
+\caption{Comparative Summary: All Three Approaches}
 \label{tab:comparison}
-\begin{tabular}{lrrr}
+\begin{tabular}{lrrrr}
 \toprule
-\textbf{Metric} & \textbf{Multi-Agent} & \textbf{Single-Agent} & \textbf{Difference} \\
+\textbf{Metric} & \textbf{Multi-Agent} & \textbf{RAG} & \textbf{Single-Agent} & \textbf{Best} \\
 \midrule
-\multicolumn{4}{l}{\textit{Strict Evaluation}} \\
-Accuracy & 21.8\% & 50.9\% & $-$29.1 pp \\
-Macro Precision & 41.7\% & 13.2\% & \textbf{+28.5 pp} \\
-Macro Recall & 30.6\% & 25.0\% & +5.6 pp \\
-Macro \fone{} & 21.6\% & 17.3\% & \textbf{+4.3 pp} \\
+\multicolumn{5}{l}{\textit{Strict Evaluation (4-class)}} \\
+Accuracy & 21.8\% & 49.1\% & 50.9\% & Single \\
+Macro Precision & 41.7\% & 29.4\% & 13.2\% & \textbf{Multi} \\
+Macro Recall & 30.6\% & 27.9\% & 25.0\% & \textbf{Multi} \\
+Macro \fone{} & 21.6\% & 24.6\% & 17.3\% & \textbf{RAG} \\
 \midrule
-\multicolumn{4}{l}{\textit{Coarse Evaluation}} \\
-Accuracy & 61.8\% & 61.8\% & 0 pp \\
-Macro Precision & 57.6\% & 21.4\% & \textbf{+36.2 pp} \\
-Macro Recall & 37.9\% & 32.4\% & +5.5 pp \\
-Macro \fone{} & 39.1\% & 25.8\% & \textbf{+13.3 pp} \\
+\multicolumn{5}{l}{\textit{Coarse Evaluation (3-class)}} \\
+Accuracy & 61.8\% & 67.3\% & 61.8\% & \textbf{RAG} \\
+Macro Precision & 57.6\% & 44.7\% & 21.4\% & \textbf{Multi} \\
+Macro Recall & 37.9\% & 40.7\% & 32.4\% & \textbf{RAG} \\
+Macro \fone{} & 39.1\% & 37.9\% & 25.8\% & \textbf{Multi} \\
 \midrule
-\multicolumn{4}{l}{\textit{Per-Class \fone{}}} \\
-Normal & 0.0\% & 0.0\% & 0 pp \\
-Connectivity & 81.0\% & 77.3\% & +3.7 pp \\
-Disk Full & 36.4\% & 0.0\% & \textbf{+36.4 pp} \\
+\multicolumn{5}{l}{\textit{Per-Class \fone{} (Coarse)}} \\
+Normal & 0.0\% & 0.0\% & 0.0\% & --- \\
+Connectivity & 81.0\% & 80.5\% & 77.3\% & \textbf{Multi} \\
+Disk Full & 36.4\% & 33.3\% & 0.0\% & \textbf{Multi} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -520,19 +599,26 @@ Disk Full & 36.4\% & 0.0\% & \textbf{+36.4 pp} \\
 \begin{enumerate}
     \item \textbf{Accuracy is Misleading}: The single-agent baseline achieves higher strict accuracy (50.9\% vs 21.8\%) by exploiting class imbalance---it predicts \texttt{machine\_down} for almost all cases.
     
-    \item \textbf{Multi-Agent Improves Macro-\fone{}}: When all classes are weighted equally:
+    \item \textbf{RAG Improves Over Single-Agent}: Adding KG retrieval to the single-agent baseline:
     \begin{itemize}
-        \item Strict Macro-\fone{}: 21.6\% vs 17.3\% (+4.3 pp)
-        \item Coarse Macro-\fone{}: 39.1\% vs 25.8\% (+13.3 pp)
+        \item Strict Macro-\fone{}: 24.6\% vs 17.3\% (+7.3 pp)
+        \item Coarse Macro-\fone{}: 37.9\% vs 25.8\% (+12.1 pp)
+        \item Enables \texttt{disk\_full} detection: 33.3\% \fone{} vs 0\%
     \end{itemize}
     
-    \item \textbf{Multi-Agent Detects Minority Classes}: The most striking difference:
+    \item \textbf{Multi-Agent Achieves Best Coarse Macro-\fone{}}: When all classes are weighted equally:
     \begin{itemize}
-        \item \texttt{disk\_full}: 36.4\% \fone{} vs 0\%
-        \item \texttt{network\_disconnection} (strict): 27.9\% \fone{} vs 0\%
+        \item Coarse Macro-\fone{}: Multi-Agent 39.1\% > RAG 37.9\% > Single 25.8\%
+        \item Highest precision on minority classes (disk\_full: 100\% precision)
     \end{itemize}
     
-    \item \textbf{Debate Prevents Majority-Class Collapse}: The multi-agent system produces diverse predictions reflecting the actual class distribution.
+    \item \textbf{All Systems Detect Minority Classes Differently}:
+    \begin{itemize}
+        \item \texttt{disk\_full}: Multi-Agent 36.4\% > RAG 33.3\% > Single 0\%
+        \item \texttt{connectivity}: Multi-Agent 81.0\% > RAG 80.5\% > Single 77.3\%
+    \end{itemize}
+    
+    \item \textbf{Debate Prevents Majority-Class Collapse}: The multi-agent system produces diverse predictions reflecting the actual class distribution, while RAG partially mitigates this through historical context.
 \end{enumerate}
 
 \section{Cross-Dataset Generalization}
@@ -583,17 +669,36 @@ The multi-agent system's ability to detect \texttt{disk\_full} (36.4\% \fone{} v
 
 The gap between strict (21.8\%) and coarse (61.8\%) accuracy reveals that log-based RCA identifies \textit{symptoms}, not \textit{injected faults}. When a machine goes down, logs show connection failures---the same symptoms as network disconnection.
 
-\subsection{Why Coarse Accuracy is Identical (61.8\%)}
+\subsection{Why RAG Achieves Highest Coarse Accuracy (67.3\%)}
 
-Both systems achieve identical coarse accuracy (61.8\%), but this masks fundamentally different behavior:
+The three systems achieve different coarse accuracies, revealing distinct behaviors:
 
 \begin{itemize}
-    \item \textbf{Single-Agent}: Achieves 61.8\% by predicting \texttt{connectivity} for nearly all samples (53/55). Since connectivity is the majority class (35/55 = 63.6\%), this ``majority-class collapse'' yields high accuracy by chance. It correctly classifies 34 connectivity samples but misses all disk\_full (0/9) and normal (0/11) cases.
+    \item \textbf{Single-Agent (61.8\%)}: Predicts \texttt{connectivity} for nearly all samples (53/55). This ``majority-class collapse'' yields moderate accuracy by chance but misses all disk\_full (0/9) and normal (0/11) cases.
     
-    \item \textbf{Multi-Agent}: Achieves 61.8\% through more balanced predictions. It correctly classifies 32/35 connectivity samples, 2/9 disk\_full samples, and 0/11 normal samples. The 9 ``unknown'' predictions (where the system abstains) actually prevent some false positives.
+    \item \textbf{RAG (67.3\%)}: The highest accuracy. KG retrieval provides historical context that helps the model make more informed predictions. It correctly classifies all 35 connectivity samples (100\% recall) while also detecting 2/9 disk\_full cases (22.2\% recall).
+    
+    \item \textbf{Multi-Agent (61.8\%)}: Achieves the same accuracy as single-agent but through more balanced predictions. It correctly classifies 32/35 connectivity samples, 2/9 disk\_full samples, and abstains on 9 cases (``unknown'').
 \end{itemize}
 
-The key insight is that \textbf{accuracy alone is misleading for imbalanced datasets}. The multi-agent system's superior macro-\fone{} (39.1\% vs 25.8\%) reflects its ability to detect minority classes, which is more valuable in practice than simply predicting the majority class.
+The key insight is that \textbf{accuracy alone is misleading for imbalanced datasets}. While RAG achieves highest accuracy, the multi-agent system's superior macro-\fone{} (39.1\% vs 37.9\% vs 25.8\%) reflects its better balance across all classes, particularly its 100\% precision on disk\_full predictions.
+
+\subsection{RAG vs Multi-Agent: When Does Debate Help?}
+
+RAG and Multi-Agent both leverage the Knowledge Graph, but differ in how they use it:
+
+\begin{itemize}
+    \item \textbf{RAG}: Single LLM call with retrieved historical incidents as context. Fast (30-45 seconds) but no verification or refinement.
+    
+    \item \textbf{Multi-Agent}: Multiple reasoners generate hypotheses from different perspectives, then debate and refine through judge feedback. Slower (3-5 minutes) but produces higher-quality, verified predictions.
+\end{itemize}
+
+The multi-agent debate provides value when:
+\begin{enumerate}
+    \item High precision is required (disk\_full: 100\% vs 66.7\% precision)
+    \item Evidence quality matters (judge scoring ensures well-supported hypotheses)
+    \item Multiple failure modes may be present (diverse reasoner perspectives)
+\end{enumerate}
 
 \section{Limitations and Detailed Analysis}
 
@@ -640,16 +745,15 @@ The multi-agent system detects disk\_full with 100\% precision but only 22.2\% r
 
 \subsection{Baseline Comparison Scope}
 
-The current evaluation compares only against a single-agent LLM baseline. While this demonstrates the value of multi-agent debate, stronger baselines would provide more context:
+The evaluation compares against two baselines: a single-agent LLM and a RAG (Retrieval-Augmented Generation) baseline. The RAG baseline demonstrates that KG retrieval alone provides significant improvement (+12.1 pp coarse macro-\fone{} over single-agent), while the multi-agent debate provides additional gains (+1.2 pp over RAG).
+
+Additional baselines would provide more context for future work:
 
 \begin{itemize}
     \item \textbf{Chain-of-Thought (CoT)}: Single LLM with explicit reasoning steps
-    \item \textbf{Retrieval-Augmented Generation (RAG)}: Single LLM with retrieved examples
     \item \textbf{Traditional ML}: Random Forest, SVM on log features (TF-IDF, n-grams)
     \item \textbf{Deep Learning}: DeepLog, LogAnomaly neural approaches
 \end{itemize}
-
-These are acknowledged as future work due to time constraints.
 
 \subsection{Cross-Dataset Evaluation Metrics}
 
@@ -717,7 +821,7 @@ This thesis presented \systemname{}, demonstrating that multi-agent debate impro
 \section{Future Work}
 
 \begin{enumerate}
-    \item \textbf{Additional Baselines}: Chain-of-Thought, RAG, traditional ML
+    \item \textbf{Additional Baselines}: Chain-of-Thought, traditional ML, deep learning approaches
     \item \textbf{Statistical Significance}: Bootstrap confidence intervals, McNemar tests
     \item \textbf{Ablation Studies}: Quantify component contributions
     \item \textbf{Knowledge Graph Expansion}: 50+ incidents, improved entity extraction
