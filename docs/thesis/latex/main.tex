@@ -225,7 +225,7 @@ The debate protocol orchestrates multi-round hypothesis refinement:
 
 \section{Dataset: Hadoop1}
 
-We evaluate on the \textbf{Hadoop1} dataset from LogHub, a widely-used benchmark for log analysis research.
+We evaluate on the \textbf{Hadoop1} dataset from LogHub, a widely-used benchmark for log analysis research. The dataset contains \textbf{394,308 log entries} across \textbf{978 log files} from \textbf{55 labeled applications} (average 7,169 lines per application, total size 49 MB).
 
 \begin{table}[H]
 \centering
@@ -241,6 +241,23 @@ network\_disconnection & 7 & 12.7\% & Network partition injected \\
 disk\_full & 9 & 16.4\% & Disk space exhaustion \\
 \midrule
 \textbf{Total} & \textbf{55} & \textbf{100\%} & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Hadoop1 Log Volume Statistics}
+\label{tab:dataset-volume}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Total Log Entries & 394,308 \\
+Total Log Files & 978 \\
+Applications & 55 \\
+Avg. Lines per Application & 7,169 \\
+Dataset Size & 49 MB \\
 \bottomrule
 \end{tabular}
 \end{table}
