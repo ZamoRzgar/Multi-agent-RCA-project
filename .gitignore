@@ -114,3 +114,5 @@ docs/week8_validation_results/
 docs/RAG_results/
 docs/HADOOP1_GROUND_TRUTH_METRICS.json
 docs/HADOOP1_GROUND_TRUTH_RESULTS.json
+docs/unused_results/
+docs/cmcc_results/
