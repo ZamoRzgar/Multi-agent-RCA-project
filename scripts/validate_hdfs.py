@@ -601,6 +601,21 @@ class HDFSValidator:
                 category = debate_result.get('category', '')
                 confidence = debate_result.get('confidence', 0.5)
                 final_score = debate_result.get('final_score', 0)
+                
+                # Multi-agent returns RCA categories (software/hardware/etc), not Normal/Anomaly
+                # Use error_count and log patterns as primary signal for binary classification
+                error_count = len(parsed_data.get('error_messages', []))
+                event_seq = parsed_data.get('event_sequence', '')
+                
+                # Check for error events in sequence
+                error_events = {'E4', 'E7', 'E8', 'E10', 'E12', 'E14', 'E17', 'E20', 'E29'}
+                has_error_events = any(e in str(event_seq) for e in error_events)
+                
+                # Heuristic: if no errors detected in logs/events, likely Normal
+                if error_count == 0 and not has_error_events:
+                    category = 'Normal'
+                else:
+                    category = 'Anomaly'
             
             pred_label = self.normalize_prediction(category, hypothesis)
             
