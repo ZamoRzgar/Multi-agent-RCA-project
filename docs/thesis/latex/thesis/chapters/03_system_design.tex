@@ -1,0 +1,319 @@
+\section{Overview}
+\systemname{} follows a layered architecture (presentation, orchestration, agent, knowledge, infrastructure). For each incident, the system parses logs, retrieves relevant KG context, generates competing hypotheses via three reasoners, and selects a final hypothesis using a judge.
+
+At a high level, the system is designed to satisfy three operational requirements:
+\begin{enumerate}
+  \item \textbf{Evidence grounding}: every hypothesis must be supported by concrete log evidence and/or retrieved historical facts.
+  \item \textbf{Diversity and verification}: multiple independent hypotheses are generated and explicitly compared.
+  \item \textbf{Operator usability}: outputs include a concise hypothesis statement, evidence snippets, affected components, and suggested resolution.
+\end{enumerate}
+
+The design philosophy draws on two complementary ideas from the LLM literature. First, retrieval-augmented generation (RAG) improves factuality by grounding model outputs in retrieved evidence \cite{lewis2021retrievalaugmentedgenerationknowledgeintensivenlp}. Second, multi-agent debate can improve reliability by forcing models to justify claims under scrutiny \cite{du2023improvingfactualityreasoninglanguage}. Our system combines both: the KG provides retrieval-based grounding, while the multi-agent protocol provides verification and diversity.
+
+\section{Layered Architecture}
+We adopt a layered design to separate concerns and improve reproducibility:
+\begin{description}
+  \item[Presentation layer:] interfaces for running evaluation scripts and collecting outputs.
+  \item[Orchestration layer:] controls the end-to-end workflow, debate rounds, stopping criteria, and error handling.
+  \item[Agent layer:] encapsulates specialized LLM roles (parser, reasoners, judge) with clear input/output contracts.
+  \item[Knowledge layer:] provides historical context via a knowledge graph, including similar incidents, entity context, and causal patterns.
+  \item[Infrastructure layer:] local LLM inference backend and Neo4j for graph storage and querying.
+\end{description}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.0cm, font=\small]
+  \tikzstyle{box}=[draw, rounded corners, align=center, minimum width=3.5cm, minimum height=0.8cm]
+  \node[box] (logs) {Raw Logs};
+  \node[box, below=of logs] (parser) {Log Parser Agent\\(structured events/entities)};
+  \node[box, below=of parser] (kg) {KG Retrieval Agent\\(similar incidents)};
+  \node[box, below left=0.8cm and -1.8cm of kg] (logr) {Log-Focused Reasoner};
+  \node[box, below=0.8cm of kg] (hyb) {Hybrid Reasoner};
+  \node[box, below right=0.8cm and -1.8cm of kg] (kgr) {KG-Focused Reasoner};
+  \node[box, below=of hyb] (judge) {Judge Agent\\(scores + feedback)};
+  \node[box, below=of judge] (out) {Final Hypothesis\\+ Category + Resolution};
+
+  \draw[->] (logs) -- (parser);
+  \draw[->] (parser) -- (kg);
+  \draw[->] (kg) -- (logr);
+  \draw[->] (kg) -- (hyb);
+  \draw[->] (kg) -- (kgr);
+  \draw[->] (logr) -- (judge);
+  \draw[->] (hyb) -- (judge);
+  \draw[->] (kgr) -- (judge);
+  \draw[->] (judge) -- (out);
+\end{tikzpicture}
+\caption{End-to-end multi-agent RCA pipeline in \systemname{}.}
+\label{fig:pipeline}
+\end{figure}
+
+\section{Data Contracts and Outputs}
+To reduce ambiguity and improve reproducibility, each agent operates over structured inputs and outputs.
+
+\subsection{Parsed Incident Representation}
+The Log Parser Agent converts raw log text into a normalized incident representation that contains:
+\begin{itemize}
+  \item \textbf{Events}: a set of timestamped events with component and action summaries.
+  \item \textbf{Error messages}: extracted exception and error strings.
+  \item \textbf{Timeline}: an ordered sequence suitable for temporal reasoning.
+  \item \textbf{Entities}: identifiers for services, hosts, and key resources.
+\end{itemize}
+This representation serves two purposes: it compresses long log windows into a manageable context for LLM reasoning, and it standardizes the interface across datasets.
+
+\subsection{Hypothesis Schema}
+Each reasoner returns a small set of hypotheses (3--5) in a structured format. Each hypothesis includes:
+\begin{itemize}
+  \item a \textbf{hypothesis} statement describing the root cause,
+  \item a \textbf{confidence} score,
+  \item \textbf{reasoning} explaining the causal chain,
+  \item \textbf{evidence} strings referencing specific log cues and/or retrieved facts,
+  \item an optional \textbf{category} and \textbf{affected components},
+  \item a \textbf{suggested resolution} for operator triage.
+\end{itemize}
+The output is later normalized to the dataset label space (e.g., Hadoop1 strict vs coarse labels).
+
+\section{Agents}
+All agents inherit from a common \texttt{BaseAgent} class that standardizes prompt construction, LLM invocation, and output parsing. Table~\ref{tab:agent-config} summarizes the six agents, their underlying models, and temperature settings.
+
+\begin{table}[H]
+\centering
+\caption{Agent Configuration Summary}
+\label{tab:agent-config}
+\begin{tabular}{llll}
+\toprule
+\textbf{Agent} & \textbf{Model} & \textbf{Temperature} & \textbf{Purpose} \\
+\midrule
+Log Parser & qwen2:7b & 0.2 & Structured extraction \\
+KG Retrieval & qwen2:7b & 0.5 & Historical context retrieval \\
+Log Reasoner & mistral:7b & 0.7 & Log pattern analysis \\
+KG Reasoner & llama2:7b & 0.7 & Historical reasoning \\
+Hybrid Reasoner & qwen2:7b & 0.7 & Combined analysis \\
+Judge & mistral:7b & 0.2 & Hypothesis evaluation \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The temperature settings reflect a deliberate tradeoff. Structured extraction tasks (parsing, judging) use low temperatures to reduce output variance and improve schema compliance. Reasoning tasks use higher temperatures to encourage diverse hypothesis generation, which is important for the debate mechanism to surface alternatives.
+
+From a foundation-model perspective, this design leverages the instruction-following capabilities of modern LLMs \cite{ouyang2022traininglanguagemodelsfollow,wei2022finetunedlanguagemodelszeroshot}. Each agent prompt specifies a clear task, required output format (JSON), and evaluation criteria. The use of multiple model families (Qwen2, Mistral, LLaMA2) provides implicit diversity, though in principle the system could also run with a single model family.
+
+\subsection{Log Parser}
+The log parser extracts structured events, entities, and error messages. This reduces downstream reasoning load and provides consistent inputs.
+
+In practice, the parser is designed to be conservative: it prioritizes extracting explicit error strings and stable entity names, and it produces a compact timeline. This design choice is important because downstream reasoning quality strongly depends on whether the parser preserves the key error signatures and temporal order.
+
+The parser prompt instructs the model to identify:
+\begin{itemize}
+  \item timestamped events with component and action summaries,
+  \item exception messages and error codes,
+  \item entity identifiers (hosts, services, block IDs, etc.),
+  \item a chronological timeline suitable for causal reasoning.
+\end{itemize}
+The output is a JSON object that serves as the canonical incident representation for all downstream agents.
+
+\subsection{KG Retrieval}
+The KG Retrieval Agent queries Neo4j for entity-overlap-based similar incidents and returns incident summaries and contexts.
+
+Retrieval aims to provide grounding facts that are useful for diagnosis, including:
+\begin{itemize}
+  \item similar historical incidents involving overlapping entities,
+  \item known causal paths observed in the past,
+  \item entity-level historical context (e.g., recurrent failure patterns),
+  \item common resolution actions.
+\end{itemize}
+The retrieved facts are passed to the reasoners and may also be used by the judge when assessing evidence quality.
+
+\subsection{Reasoners}
+Three reasoners generate 3--5 hypotheses each:
+\begin{itemize}
+  \item \textbf{Log-focused}: emphasizes temporal patterns, error propagation, and anomalies visible in the current incident logs.
+  \item \textbf{KG-focused}: emphasizes recurrence, historical patterns, and known causal paths from similar past incidents.
+  \item \textbf{Hybrid}: synthesizes both log evidence and historical knowledge, cross-validating findings from both sources.
+\end{itemize}
+
+The reasoners are intentionally redundant: each reasoner is capable of producing a complete diagnosis, but with a different inductive bias. This redundancy supports verification because disagreements highlight ambiguity or missing evidence.
+
+\paragraph{Reasoning prompts.}
+Each reasoner receives a structured prompt that includes:
+\begin{enumerate}
+  \item the parsed incident representation (events, errors, timeline, entities),
+  \item for KG-focused and Hybrid reasoners: retrieved historical context,
+  \item explicit analysis instructions (e.g., ``analyze temporal patterns'', ``compare with similar past incidents''),
+  \item output format specification (JSON array of hypotheses).
+\end{enumerate}
+
+The prompts are designed to elicit chain-of-thought-style reasoning \cite{wei2023chainofthoughtpromptingelicitsreasoning}, where the model explains its causal reasoning before committing to a hypothesis. This improves interpretability and provides material for the judge to evaluate.
+
+\paragraph{Hypothesis diversity.}
+A key design goal is to avoid premature convergence to a single explanation. By running three reasoners with different evidence emphases and different underlying models, the system increases the probability that at least one reasoner will surface the correct diagnosis even when others miss it. This is conceptually related to self-consistency approaches that sample multiple reasoning paths \cite{wang2023selfconsistencyimproveschainthought}, but implemented via architectural diversity rather than repeated sampling from a single model.
+
+\subsection{Judge}
+The judge evaluates hypotheses and assigns a 0--100 score based on evidence quality, reasoning strength, confidence calibration, completeness, and consistency. The top hypothesis is selected and the judge provides feedback for refinement rounds.
+
+The judge is responsible for two outputs:
+\begin{enumerate}
+  \item \textbf{Selection}: choose the best-supported hypothesis under a fixed rubric.
+  \item \textbf{Feedback}: provide actionable critique that can be used to refine hypotheses in the next round.
+\end{enumerate}
+This explicit scoring mechanism is a key design element: it turns ``debate'' into a measurable decision process rather than an unstructured conversation.
+
+\paragraph{Evaluation rubric.}
+The judge scores each hypothesis on five criteria:
+\begin{enumerate}
+  \item \textbf{Evidence Quality (0--30 points)}: specificity and directness of evidence, number of supporting facts, evidence from logs vs historical data.
+  \item \textbf{Reasoning Strength (0--25 points)}: logical coherence, causal chain clarity, explanation completeness.
+  \item \textbf{Confidence Calibration (0--20 points)}: whether confidence matches evidence strength, appropriate uncertainty acknowledgment.
+  \item \textbf{Completeness (0--15 points)}: identifies affected components, provides resolution steps, considers side effects.
+  \item \textbf{Consistency (0--10 points)}: aligns with other evidence, does not contradict facts, fits known patterns.
+\end{enumerate}
+The rubric is designed to reward hypotheses that are well-grounded and actionable, while penalizing overconfident or unsupported claims. This addresses a known limitation of LLM-based reasoning: models can generate plausible but incorrect explanations when not constrained by explicit verification \cite{du2023improvingfactualityreasoninglanguage}.
+
+\paragraph{Judge output format.}
+The judge returns a JSON array containing, for each hypothesis:
+\begin{itemize}
+  \item the original hypothesis text and source agent,
+  \item a total score (0--100) and per-criterion subscores,
+  \item a list of strengths and weaknesses,
+  \item detailed feedback explaining the scores.
+\end{itemize}
+This structured output enables both automated selection (pick the highest-scoring hypothesis) and human review (inspect the reasoning behind the selection).
+
+\section{Debate Protocol}
+The system runs for up to 3 rounds. In each round, reasoners generate hypotheses; the judge scores them and provides feedback; and reasoners refine hypotheses based on feedback and other agents' best hypotheses. The debate stops when scores plateau or the maximum rounds are reached.
+
+The debate protocol is formalized in Algorithm~\ref{alg:debate}.
+
+\begin{algorithm}[H]
+\caption{Multi-Agent Debate Protocol}
+\label{alg:debate}
+\begin{algorithmic}[1]
+\State \textbf{Input:} Parsed logs $L$, KG context $K$
+\State \textbf{Output:} Final hypothesis $h^*$ with score $s^*$
+\For{round $r = 1$ to max\_rounds}
+    \State $H_{\text{log}} \gets$ LogReasoner.GenerateHypotheses($L$)
+    \State $H_{\text{kg}} \gets$ KGReasoner.GenerateHypotheses($K$)
+    \State $H_{\text{hybrid}} \gets$ HybridReasoner.GenerateHypotheses($L$, $K$)
+    \State $H_{\text{all}} \gets H_{\text{log}} \cup H_{\text{kg}} \cup H_{\text{hybrid}}$
+    \State scores, feedback $\gets$ Judge.Evaluate($H_{\text{all}}$)
+    \If{Converged(scores) \textbf{or} $r =$ max\_rounds}
+        \State \textbf{break}
+    \EndIf
+    \State Reasoners.Refine(feedback, TopHypotheses($H_{\text{all}}$))
+\EndFor
+\State \Return $h^* \gets \arg\max_h$ scores[$h$]
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Round Dynamics}
+In the first round, each reasoner generates hypotheses independently based on its designated evidence source. In subsequent rounds, reasoners receive:
+\begin{itemize}
+  \item the judge's feedback on their previous hypotheses,
+  \item the top-scoring hypotheses from other reasoners,
+  \item any additional context that may have been retrieved.
+\end{itemize}
+This cross-pollination of ideas is a key mechanism: it allows a reasoner to incorporate insights from other perspectives while still maintaining its specialized focus.
+
+\subsection{Convergence and Stopping Criteria}
+We adopt a simple stopping policy suitable for evaluation settings: stop when the judge score no longer improves meaningfully across rounds (e.g., improvement $< 5$ points), or when the maximum number of rounds (default: 3) is reached. This trades off compute cost against the benefit of additional refinement.
+
+In practice, we observe that most cases converge within 2--3 rounds. Cases that do not converge typically involve ambiguous evidence where multiple diagnoses are plausible.
+
+\subsection{Failure Handling}
+Because LLM outputs can be malformed (e.g., invalid JSON), the orchestration layer includes validation and retry logic. When an agent output fails to parse or violates schema constraints, the system can re-prompt or fall back to a reduced output format. This is essential for running large-scale evaluations over many cases without manual intervention.
+
+Specific failure modes handled include:
+\begin{itemize}
+  \item \textbf{JSON parse errors}: retry with explicit format reminder in prompt.
+  \item \textbf{Missing required fields}: fill with defaults or request regeneration.
+  \item \textbf{Timeout}: use partial results if available, otherwise skip agent for this round.
+  \item \textbf{Empty hypothesis list}: fall back to a generic ``unknown'' prediction.
+\end{itemize}
+
+\section{Knowledge Graph}
+The KG stores incidents, entities, and root causes, with relationships such as \texttt{INVOLVES}, \texttt{HAS\_ROOT\_CAUSE}, and \texttt{SIMILAR\_TO}. Retrieval is performed via Cypher queries that prioritize shared entities and high-scoring historical incidents.
+
+Knowledge graphs provide a flexible mechanism to represent entities, incidents, and relations, supporting entity-centric retrieval and reasoning over multi-hop relations \cite{hogan2021knowledge}. In AIOps contexts, KGs can store historical incidents and their diagnosed root causes, enabling recurrence reasoning when a new incident shares entities or patterns with prior cases \cite{cui2025aetherlog}.
+
+\subsection{Schema Design}
+We use a lightweight incident-centric schema that supports both retrieval and interpretability. The schema includes three core node types:
+
+\begin{itemize}
+  \item \textbf{Incident Node}: stores incident\_id, dataset, scenario\_id, final\_score, and final\_hypothesis.
+  \item \textbf{Entity Node}: stores name and type (resource, config, component, or issue).
+  \item \textbf{RootCause Node}: stores description, confidence, and source agent.
+\end{itemize}
+
+Relationships connect these nodes:
+\begin{itemize}
+  \item \texttt{INVOLVES}: (Incident) $\rightarrow$ (Entity) --- links an incident to the entities mentioned in its logs.
+  \item \texttt{HAS\_ROOT\_CAUSE}: (Incident) $\rightarrow$ (RootCause) --- links an incident to its diagnosed root cause.
+  \item \texttt{SIMILAR\_TO}: (Incident) $\leftrightarrow$ (Incident) --- bidirectional link between incidents with high entity overlap.
+\end{itemize}
+
+This schema is intentionally simple to support portability across datasets. More complex schemas (e.g., with event-level nodes or temporal edges) are possible but would require dataset-specific adaptation.
+
+\subsection{Similarity Signals}
+In our implementation, similarity is primarily computed from entity overlap and incident metadata. This choice is motivated by interpretability and portability: entity overlap can be computed reliably even when log templates change across versions.
+
+\subsection{Retrieval Queries}
+The KG Retrieval Agent executes Cypher queries to find relevant historical context. A typical query pattern is:
+\begin{enumerate}
+  \item Given the entities extracted from the current incident, find all historical incidents that involve at least one overlapping entity.
+  \item Rank by number of shared entities and by the final score of the historical incident (higher-scoring incidents are more reliable).
+  \item Return the top-$k$ incidents along with their root causes and resolution summaries.
+\end{enumerate}
+
+This retrieval strategy is designed to balance recall (find potentially relevant incidents) with precision (prioritize high-quality matches). The retrieved context is formatted as structured text and passed to the KG-focused and Hybrid reasoners.
+
+\section{Data Flow}
+This section summarizes the end-to-end data flow through the system, from raw logs to final diagnosis.
+
+\subsection{Input Processing}
+The pipeline begins with raw log data associated with an incident:
+\begin{enumerate}
+  \item \textbf{Log ingestion}: raw log files or CSV records are loaded and associated with incident metadata.
+  \item \textbf{Parsing}: the Log Parser Agent extracts structured events, entities, error messages, and a timeline.
+  \item \textbf{Incident representation}: the parsed output is formatted as a JSON object that serves as the canonical input for all downstream agents.
+\end{enumerate}
+
+\subsection{Context Retrieval}
+Before reasoning begins, the system retrieves historical context:
+\begin{enumerate}
+  \item \textbf{Entity extraction}: entities from the parsed incident are used as query keys.
+  \item \textbf{KG query}: the KG Retrieval Agent executes Cypher queries to find similar historical incidents.
+  \item \textbf{Context formatting}: retrieved incidents, root causes, and resolution summaries are formatted as structured text.
+\end{enumerate}
+
+\subsection{Hypothesis Generation}
+Three reasoners generate competing hypotheses in parallel:
+\begin{enumerate}
+  \item \textbf{Log-focused}: receives parsed incident data only.
+  \item \textbf{KG-focused}: receives retrieved historical context only.
+  \item \textbf{Hybrid}: receives both parsed incident data and historical context.
+\end{enumerate}
+Each reasoner produces 3--5 hypotheses in structured JSON format.
+
+\subsection{Judging and Selection}
+The Judge Agent evaluates all hypotheses:
+\begin{enumerate}
+  \item \textbf{Scoring}: each hypothesis is scored on five criteria (evidence quality, reasoning strength, confidence calibration, completeness, consistency).
+  \item \textbf{Feedback}: the judge provides strengths, weaknesses, and detailed feedback for each hypothesis.
+  \item \textbf{Selection}: the highest-scoring hypothesis is selected as the final diagnosis.
+\end{enumerate}
+
+\subsection{Refinement (Optional)}
+If the debate protocol runs for multiple rounds:
+\begin{enumerate}
+  \item \textbf{Feedback distribution}: judge feedback and top hypotheses from other agents are shared with each reasoner.
+  \item \textbf{Hypothesis refinement}: reasoners generate updated hypotheses incorporating the feedback.
+  \item \textbf{Re-judging}: the judge scores the refined hypotheses.
+  \item \textbf{Convergence check}: the process repeats until scores plateau or the maximum rounds are reached.
+\end{enumerate}
+
+\subsection{Output Generation}
+The final output includes:
+\begin{itemize}
+  \item the selected hypothesis with its score and evidence,
+  \item the normalized prediction (mapped to the dataset label space),
+  \item metadata for logging and analysis (all intermediate outputs, judge feedback, etc.).
+\end{itemize}

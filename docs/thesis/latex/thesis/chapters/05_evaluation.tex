@@ -1,0 +1,513 @@
+\section{Datasets}
+We evaluate on three datasets:
+\begin{itemize}
+  \item \textbf{Hadoop1 (LogHub)}: 55 labeled applications with four fault types (normal, machine\_down, network\_disconnection, disk\_full).
+  \item \textbf{CMCC (LogKG)}: 93 OpenStack failure cases with 7 failure types.
+  \item \textbf{HDFS\_v1 (LogHub)}: 575,061 block traces with binary labels; we evaluate a balanced sample of 200 blocks.
+\end{itemize}
+
+\section{Evaluation Schemes and Metrics}
+For Hadoop1, we evaluate using both \textbf{strict} (4-class) and \textbf{coarse} (3-class) label schemes. We report accuracy and macro-\fone{}; for imbalanced settings, macro-\fone{} is emphasized.
+
+\subsection{Metrics}
+We report the following metrics:
+\begin{itemize}
+  \item \textbf{Accuracy}: the fraction of cases whose predicted label matches the ground truth.
+  \item \textbf{Precision/Recall}: per-class precision and recall, aggregated as \textbf{macro averages} (unweighted mean across classes).
+  \item \textbf{Macro-\fone{}}: the unweighted mean of per-class \fone{} scores.
+\end{itemize}
+Macro-averaged metrics are important in operational settings because they reduce the dominance of frequent classes and better reflect performance on rare but operationally critical failures.
+
+\subsection{Strict vs. coarse label schemes (Hadoop1)}
+Hadoop1 supports two evaluation views. The strict scheme uses the four original labels, while the coarse scheme merges semantically similar connectivity-related faults into a single class. This provides a more operator-aligned view because multiple low-level causes (e.g., machine down vs. network disconnection) can manifest as connectivity disruption at the application level.
+
+\subsection{LLM-based evaluation protocol}
+All three pipelines produce natural-language hypotheses and must be mapped to a dataset label for evaluation. This introduces two practical constraints. First, LLM outputs must be sufficiently structured to enable automatic parsing at scale. Second, the evaluation must avoid over-interpreting ambiguous text. For this reason, we prompt models for structured JSON outputs and perform conservative label normalization.
+
+This setup follows a growing trend in using transformer-based LLMs for complex reasoning and explanation generation \cite{vaswani2023attentionneed,brown2020languagemodelsfewshotlearners}. However, reliability is not guaranteed by the foundation model alone, and instruction-following behavior can vary with model family and alignment training \cite{ouyang2022traininglanguagemodelsfollow}. Our multi-agent protocol addresses this by generating diverse candidates and applying an explicit judge for evidence-based selection \cite{du2023improvingfactualityreasoninglanguage,wu2023autogen}.
+
+\subsection{Baselines}
+We compare against:
+\begin{itemize}
+  \item \textbf{Single-agent}: a single LLM call that reasons over incident logs.
+  \item \textbf{RAG}: a single LLM call augmented with retrieved historical context. RAG is a common mechanism for improving factuality by grounding generation in external evidence \cite{lewis2021retrievalaugmentedgenerationknowledgeintensivenlp}.
+\end{itemize}
+
+\section{Hadoop1 Experimental Setup (Official)}
+\subsection{Dataset Statistics}
+\begin{table}[H]
+\centering
+\caption{Hadoop1 Dataset Statistics}
+\label{tab:hadoop1-dataset}
+\begin{tabular}{lrrl}
+\toprule
+\textbf{Label} & \textbf{Count} & \textbf{Percentage} & \textbf{Description} \\
+\midrule
+normal & 11 & 20.0\% & No injected fault \\
+machine\_down & 28 & 50.9\% & Node failure injected \\
+network\_disconnection & 7 & 12.7\% & Network partition injected \\
+disk\_full & 9 & 16.4\% & Disk space exhaustion \\
+\midrule
+\textbf{Total} & \textbf{55} & \textbf{100\%} & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Hadoop1 Log Volume Statistics}
+\label{tab:hadoop1-volume}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Total Log Entries & 394,308 \\
+Total Log Files & 978 \\
+Applications & 55 \\
+Avg. Lines per Application & 7,169 \\
+Dataset Size & 49 MB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Baseline Comparison}
+We compare the multi-agent pipeline against two baselines:
+\begin{enumerate}
+  \item \textbf{Single-Agent LLM}: one LLM call using log context only.
+  \item \textbf{RAG Baseline}: one LLM call augmented with similar historical incidents retrieved from the knowledge graph.
+\end{enumerate}
+
+\begin{table}[H]
+\centering
+\caption{System Comparison}
+\label{tab:systems}
+\begin{tabular}{llll}
+\toprule
+\textbf{Aspect} & \textbf{Multi-Agent} & \textbf{RAG} & \textbf{Single-Agent} \\
+\midrule
+LLM Calls per app & 8--15 & 1 & 1 \\
+Perspectives & 3 (Log, KG, Hybrid) & 1 & 1 \\
+KG Integration & Yes & Yes (retrieval only) & No \\
+Debate/Refinement & Yes (2--3 rounds) & No & No \\
+Cross-Validation & Yes (Judge) & No & No \\
+Runtime per app & 3--5 minutes & 30--45 seconds & 30 seconds \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Hadoop1 Results (Official)}
+\subsection{Multi-Agent Pipeline Results}
+\subsubsection{Strict (4-class) Evaluation}
+\begin{table}[H]
+\centering
+\caption{Multi-Agent Strict Evaluation Results}
+\label{tab:ma-strict}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Accuracy & 21.8\% (12/55) \\
+Macro Precision & 41.7\% \\
+Macro Recall & 30.6\% \\
+Macro \fone{} & 21.6\% \\
+Unknown Predictions & 9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Multi-Agent Per-Class Results (Strict)}
+\label{tab:ma-strict-perclass}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Class} & \textbf{Support} & \textbf{Precision} & \textbf{Recall} & \textbf{\fone{}} \\
+\midrule
+normal & 11 & 0.0\% & 0.0\% & 0.0\% \\
+machine\_down & 28 & 50.0\% & 14.3\% & 22.2\% \\
+network\_disconnection & 7 & 16.7\% & 85.7\% & 27.9\% \\
+disk\_full & 9 & 100.0\% & 22.2\% & 36.4\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Multi-Agent Confusion Matrix (Strict)}
+\label{tab:ma-cm-strict}
+\begin{tabular}{l|ccccc}
+\toprule
+& \multicolumn{5}{c}{\textbf{Predicted}} \\
+\textbf{Ground Truth} & normal & mach\_down & net\_disc & disk\_full & unknown \\
+\midrule
+normal (n=11) & 0 & 2 & 6 & 0 & 3 \\
+machine\_down (n=28) & 0 & 4 & 21 & 0 & 3 \\
+network\_disc (n=7) & 0 & 1 & 6 & 0 & 0 \\
+disk\_full (n=9) & 0 & 1 & 3 & 2 & 3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Interpretation (strict).}
+The strict scheme exposes a mismatch between symptom-level evidence and injected-fault labels. The confusion matrix shows that many \texttt{machine\_down} and \texttt{normal} cases are predicted as \texttt{network\_disconnection}, suggesting that observable log cues in Hadoop1 frequently emphasize connectivity symptoms. In addition, the multi-agent pipeline produces a non-trivial number of \texttt{unknown} predictions, which occurs when the free-text hypothesis does not map cleanly to one of the strict labels.
+
+The per-class table highlights a common operational phenomenon: a model can have strong precision on a rare class (e.g., \texttt{disk\_full}) when it emits the label, but low recall if it rarely selects it. This motivates reporting macro metrics alongside accuracy.
+
+\subsubsection{Coarse (3-class) Evaluation}
+\begin{table}[H]
+\centering
+\caption{Multi-Agent Coarse Evaluation Results}
+\label{tab:ma-coarse}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Accuracy & 61.8\% (34/55) \\
+Macro Precision & 57.6\% \\
+Macro Recall & 37.9\% \\
+Macro \fone{} & 39.1\% \\
+Unknown Predictions & 9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Multi-Agent Per-Class Results (Coarse)}
+\label{tab:ma-coarse-perclass}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Class} & \textbf{Support} & \textbf{Precision} & \textbf{Recall} & \textbf{\fone{}} \\
+\midrule
+normal & 11 & 0.0\% & 0.0\% & 0.0\% \\
+connectivity & 35 & 72.7\% & 91.4\% & 81.0\% \\
+disk\_full & 9 & 100.0\% & 22.2\% & 36.4\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Multi-Agent Confusion Matrix (Coarse)}
+\label{tab:ma-cm-coarse}
+\begin{tabular}{l|cccc}
+\toprule
+& \multicolumn{4}{c}{\textbf{Predicted}} \\
+\textbf{Ground Truth} & normal & connectivity & disk\_full & unknown \\
+\midrule
+normal (n=11) & 0 & 8 & 0 & 3 \\
+connectivity (n=35) & 0 & 32 & 0 & 3 \\
+disk\_full (n=9) & 0 & 4 & 2 & 3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Interpretation (coarse).}
+The coarse scheme reduces label ambiguity by aligning evaluation with the dominant symptom-level evidence present in Hadoop1 logs. As a result, connectivity-related cases become easier to classify and macro-\fone{} improves compared to the strict scheme. This is consistent with prior findings that label semantics and preprocessing choices can strongly affect reported performance \cite{le2022logdlhowfar}.
+
+\subsection{Single-Agent Baseline Results}
+\subsubsection{Strict (4-class) Evaluation}
+\begin{table}[H]
+\centering
+\caption{Single-Agent Strict Evaluation Results}
+\label{tab:sa-strict}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Accuracy & 50.9\% (28/55) \\
+Macro Precision & 13.2\% \\
+Macro Recall & 25.0\% \\
+Macro \fone{} & 17.3\% \\
+Unknown Predictions & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Single-Agent Per-Class Results (Strict)}
+\label{tab:sa-strict-perclass}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Class} & \textbf{Support} & \textbf{Precision} & \textbf{Recall} & \textbf{\fone{}} \\
+\midrule
+normal & 11 & 0.0\% & 0.0\% & 0.0\% \\
+machine\_down & 28 & 52.8\% & 100.0\% & 69.1\% \\
+network\_disconnection & 7 & 0.0\% & 0.0\% & 0.0\% \\
+disk\_full & 9 & 0.0\% & 0.0\% & 0.0\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Coarse (3-class) Evaluation}
+\begin{table}[H]
+\centering
+\caption{Single-Agent Coarse Evaluation Results}
+\label{tab:sa-coarse}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Accuracy & 61.8\% (34/55) \\
+Macro Precision & 21.4\% \\
+Macro Recall & 32.4\% \\
+Macro \fone{} & 25.8\% \\
+Unknown Predictions & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{RAG Baseline Results}
+\subsubsection{Strict (4-class) Evaluation}
+\begin{table}[H]
+\centering
+\caption{RAG Baseline Strict Evaluation Results}
+\label{tab:rag-strict}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Accuracy & 49.1\% (27/55) \\
+Macro Precision & 29.4\% \\
+Macro Recall & 27.9\% \\
+Macro \fone{} & 24.6\% \\
+Unknown Predictions & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Coarse (3-class) Evaluation}
+\begin{table}[H]
+\centering
+\caption{RAG Baseline Coarse Evaluation Results}
+\label{tab:rag-coarse}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Accuracy & 67.3\% (37/55) \\
+Macro Precision & 44.7\% \\
+Macro Recall & 40.7\% \\
+Macro \fone{} & 37.9\% \\
+Unknown Predictions & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Comparative Summary and Key Findings}
+\begin{table}[H]
+\centering
+\caption{Comparative Summary: All Three Approaches}
+\label{tab:comparison}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Metric} & \textbf{Multi-Agent} & \textbf{RAG} & \textbf{Single-Agent} & \textbf{Best} \\
+\midrule
+\multicolumn{5}{l}{\textit{Strict Evaluation (4-class)}} \\
+Accuracy & 21.8\% & 49.1\% & 50.9\% & Single \\
+Macro Precision & 41.7\% & 29.4\% & 13.2\% & \textbf{Multi} \\
+Macro Recall & 30.6\% & 27.9\% & 25.0\% & \textbf{Multi} \\
+Macro \fone{} & 21.6\% & 24.6\% & 17.3\% & \textbf{RAG} \\
+\midrule
+\multicolumn{5}{l}{\textit{Coarse Evaluation (3-class)}} \\
+Accuracy & 61.8\% & 67.3\% & 61.8\% & \textbf{RAG} \\
+Macro Precision & 57.6\% & 44.7\% & 21.4\% & \textbf{Multi} \\
+Macro Recall & 37.9\% & 40.7\% & 32.4\% & \textbf{RAG} \\
+Macro \fone{} & 39.1\% & 37.9\% & 25.8\% & \textbf{Multi} \\
+\midrule
+\multicolumn{5}{l}{\textit{Per-Class \fone{} (Coarse)}} \\
+Normal & 0.0\% & 0.0\% & 0.0\% & --- \\
+Connectivity & 81.0\% & 80.5\% & 77.3\% & \textbf{Multi} \\
+Disk Full & 36.4\% & 33.3\% & 0.0\% & \textbf{Multi} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Strict vs. coarse takeaway.}
+Across pipelines, strict Hadoop1 accuracy can be misleading: a model that over-predicts the majority label can appear strong on accuracy while failing minority classes (macro-\fone{} near zero for some classes). The multi-agent approach trades off strict accuracy for improved class balance under the coarse scheme, which is often closer to diagnostic utility.
+
+\section{Cross-Dataset Validation (Official)}
+\subsection{CMCC Dataset: OpenStack Multi-Class RCA}
+\begin{table}[H]
+\centering
+\caption{CMCC Dataset Characteristics}
+\label{tab:cmcc-dataset}
+\begin{tabular}{lr}
+\toprule
+\textbf{Attribute} & \textbf{Value} \\
+\midrule
+Total Cases & 93 \\
+Domain & OpenStack Cloud \\
+Failure Classes & 7 \\
+Log Format & Pre-parsed CSV \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{CMCC Failure Type Distribution}
+\label{tab:cmcc-distribution}
+\begin{tabular}{lrl}
+\toprule
+\textbf{Failure Type} & \textbf{Count} & \textbf{Description} \\
+\midrule
+AMQP & 25 & RabbitMQ connection failures \\
+Mysql & 18 & Database connection errors \\
+CreateErrorFlavor & 16 & Nova flavor creation errors \\
+CreateErrorNovaConductor & 13 & Nova conductor service errors \\
+Down & 12 & Service unavailable \\
+CreateErrorLinuxbridgeAgent & 9 & Neutron agent errors \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{CMCC 7-Class RCA Results}
+\label{tab:cmcc-results}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Pipeline} & \textbf{Accuracy} & \textbf{Macro \fone{}} & \textbf{Unknown} & \textbf{Improvement} \\
+\midrule
+\textbf{Multi-Agent} & \textbf{61.3\%} & \textbf{55.6\%} & 17.2\% & --- \\
+RAG & 8.6\% & 10.3\% & 70.0\% & 7.1$\times$ \\
+Single-Agent & 4.3\% & 5.3\% & 60.2\% & 14.3$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Interpretation.}
+CMCC highlights the difficulty of mapping heterogeneous OpenStack logs into a discrete multi-class taxonomy. The single-agent and RAG baselines show a very large fraction of \texttt{unknown} predictions, indicating that a single-pass explanation often fails to align with the label space. The multi-agent system reduces \texttt{unknown} outcomes by enforcing structured evaluation and refinement: multiple hypotheses compete and the judge favors hypotheses with concrete evidence and consistent causal narratives.
+
+More broadly, transformer LMs can generalize semantically in a few-shot setting \cite{brown2020languagemodelsfewshotlearners}, but mapping free-text reasoning into closed categories benefits from explicit verification and judging \cite{du2023improvingfactualityreasoninglanguage}.
+
+\begin{table}[H]
+\centering
+\caption{CMCC Per-Class Performance (Multi-Agent)}
+\label{tab:cmcc-perclass}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Class} & \textbf{Support} & \textbf{Precision} & \textbf{Recall} & \textbf{\fone{}} \\
+\midrule
+Mysql & 18 & 94.7\% & 100.0\% & 97.3\% \\
+AMQP & 25 & 71.0\% & 88.0\% & 78.6\% \\
+CreateErrorNovaConductor & 13 & 55.6\% & 76.9\% & 64.5\% \\
+CreateErrorLinuxbridgeAgent & 9 & 100.0\% & 44.4\% & 61.5\% \\
+CreateErrorFlavor & 16 & 100.0\% & 18.8\% & 31.6\% \\
+Down & 12 & 0.0\% & 0.0\% & 0.0\% \\
+\midrule
+\textbf{Macro Average} & 93 & 70.2\% & 54.7\% & 55.6\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Per-class behavior.}
+Classes with distinctive error signatures (e.g., \texttt{Mysql}, \texttt{AMQP}) tend to be predicted more reliably than classes that share symptom-level cues. This is consistent with the intuition that log-only reasoning is strongest when error messages are explicit, and weaker when failures manifest indirectly through downstream components.
+
+\subsection{HDFS\_v1 Dataset: Large-Scale Binary Anomaly Detection}
+\begin{table}[H]
+\centering
+\caption{HDFS\_v1 Dataset Characteristics}
+\label{tab:hdfs-dataset}
+\begin{tabular}{lr}
+\toprule
+\textbf{Attribute} & \textbf{Value} \\
+\midrule
+Total Block Traces & 575,061 \\
+Normal Blocks & 558,223 (97.1\%) \\
+Anomaly Blocks & 16,838 (2.9\%) \\
+Evaluation Sample & 200 (balanced) \\
+Domain & Hadoop HDFS \\
+Label Type & Binary (Normal/Anomaly) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Why HDFS\_v1 matters.}
+HDFS-style benchmarks are closely related to early work showing that console logs contain enough signal to detect system problems when mined appropriately \cite{xu2009consolelogs}. In our thesis, HDFS\_v1 serves as a stress test for an explanation-oriented pipeline under realistic log volume and strong class imbalance in the full dataset.
+
+\begin{table}[H]
+\centering
+\caption{HDFS\_v1 Binary Anomaly Detection Results (n=200)}
+\label{tab:hdfs-results}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Pipeline} & \textbf{Accuracy} & \textbf{Macro \fone{}} & \textbf{Normal \fone{}} & \textbf{Anomaly \fone{}} \\
+\midrule
+\textbf{Multi-Agent} & \textbf{69.5\%} & \textbf{69.4\%} & 70.8\% & \textbf{68.1\%} \\
+Single-Agent & 65.0\% & 61.3\% & 74.0\% & 48.5\% \\
+RAG & 63.0\% & 63.6\% & 64.3\% & 63.0\% \\
+Random Baseline & 50.0\% & 50.0\% & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Interpretation.}
+Binary anomaly detection differs from multi-class RCA, but it still benefits from evidence-grounded explanation. The single-agent baseline exhibits asymmetric behavior (high recall on normal but low recall on anomaly), which is consistent with conservative decision-making under uncertainty. The multi-agent approach mitigates this by forcing alternative hypotheses and requiring evidence quality to be scored.
+
+\begin{table}[H]
+\centering
+\caption{HDFS\_v1 Per-Class Performance}
+\label{tab:hdfs-perclass}
+\begin{tabular}{llrrr}
+\toprule
+\textbf{Class} & \textbf{Pipeline} & \textbf{Precision} & \textbf{Recall} & \textbf{\fone{}} \\
+\midrule
+\multirow{3}{*}{Normal (n=100)}
+& Multi-Agent & 67.9\% & 74.0\% & 70.8\% \\
+& Single-Agent & 59.9\% & 97.0\% & 74.0\% \\
+& RAG & 65.6\% & 63.0\% & 64.3\% \\
+\midrule
+\multirow{3}{*}{Anomaly (n=100)}
+& Multi-Agent & 71.4\% & 65.0\% & 68.1\% \\
+& Single-Agent & 91.7\% & 33.0\% & 48.5\% \\
+& RAG & 63.0\% & 63.0\% & 63.0\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Connection to log anomaly research.}
+While we do not train deep learning anomaly detectors in this thesis, the HDFS setting is closely related to established approaches such as DeepLog \cite{du2017deeplog} and subsequent work on robustness and semantics-aware detection \cite{zhang2019logrobust,ijcai2019p658,guo2021logbert}. Our goal is complementary: to test whether a debate-based, KG-grounded LLM system can provide actionable diagnoses without dataset-specific training.
+
+\section{Misclassification Audit}
+To understand the failure modes of the multi-agent system, we conduct a qualitative audit of misclassified cases.
+
+\subsection{Hadoop1 Misclassifications}
+The confusion matrices reveal several patterns:
+
+\paragraph{Normal $\rightarrow$ Connectivity.}
+Many ground-truth \texttt{normal} cases are predicted as connectivity failures. Upon inspection, these cases often contain log messages about network operations or node communication that, while not indicating a fault, are interpreted by the reasoners as connectivity symptoms. This suggests that the ``normal'' label in Hadoop1 may not mean ``no network activity'' but rather ``no injected fault,'' which is a subtle distinction.
+
+\paragraph{Machine\_down $\rightarrow$ Network\_disconnection.}
+Under the strict scheme, many \texttt{machine\_down} cases are predicted as \texttt{network\_disconnection}. This is understandable because a machine failure often manifests as connectivity loss from the perspective of other nodes. The log evidence may not distinguish between ``the machine is down'' and ``the network path to the machine is broken.'' This motivates the coarse evaluation scheme, which merges these categories.
+
+\paragraph{Disk\_full $\rightarrow$ Unknown.}
+Some \texttt{disk\_full} cases are predicted as \texttt{unknown}. This occurs when the hypothesis text describes storage-related issues but does not use the exact keywords expected by the normalizer. This is a limitation of rule-based normalization.
+
+\subsection{CMCC Misclassifications}
+The CMCC dataset shows different patterns:
+
+\paragraph{Down $\rightarrow$ Unknown.}
+The \texttt{Down} class has 0\% recall, meaning no cases are correctly predicted. Upon inspection, ``Down'' is a generic service unavailability label that can manifest with diverse symptoms. The reasoners often produce hypotheses about specific services (e.g., ``Nova conductor failure'') rather than the generic ``Down'' label.
+
+\paragraph{CreateErrorFlavor $\rightarrow$ Other classes.}
+Some flavor creation errors are misclassified as other Nova-related failures. This occurs because the log evidence for flavor creation errors may overlap with other Nova errors, and the reasoners may not distinguish the specific operation that failed.
+
+\subsection{HDFS\_v1 Misclassifications}
+For binary anomaly detection:
+
+\paragraph{Anomaly $\rightarrow$ Normal.}
+The single-agent baseline has very low anomaly recall (33\%), meaning it frequently predicts normal when the ground truth is anomaly. This is consistent with conservative behavior: when uncertain, the model defaults to the ``safe'' prediction. The multi-agent system improves anomaly recall to 65\% by forcing alternative hypotheses to be considered.
+
+\paragraph{Normal $\rightarrow$ Anomaly.}
+Some normal cases are predicted as anomaly. Upon inspection, these cases often contain log messages that look unusual (e.g., block deletions, replication events) but are actually normal operations. This highlights the challenge of distinguishing ``unusual but normal'' from ``anomalous.''
+
+\subsection{Implications for System Design}
+The misclassification audit suggests several directions for improvement:
+\begin{itemize}
+  \item \textbf{Better normalization}: more sophisticated mapping from hypotheses to labels, potentially using semantic similarity rather than keyword matching.
+  \item \textbf{Label-aware prompting}: explicitly inform reasoners about the available label categories and their definitions.
+  \item \textbf{Confidence thresholds}: use judge scores to identify low-confidence predictions that should be flagged for human review rather than committed to a label.
+\end{itemize}

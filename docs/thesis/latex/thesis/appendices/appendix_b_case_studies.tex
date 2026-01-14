@@ -1,0 +1,67 @@
+We report three representative case studies illustrating (i) a correct CMCC diagnosis, (ii) a CMCC failure-mode confusion, and (iii) a concrete HDFS\_v1 anomaly with explicit log evidence. Case studies are extracted from the saved result JSON files.
+
+\section{CMCC Case Study: Correct MySQL Failure Diagnosis}
+\textbf{Dataset:} CMCC (OpenStack)\\
+\textbf{Ground truth:} Mysql\\
+\textbf{Predicted:} Mysql\\
+ \textbf{Case ID:} \texttt{1605fc948d37ac56}\\
+ \textbf{Source file:} \texttt{docs/cmcc\_results/CMCC\_MULTI\_AGENT\_RESULTS.json}
+
+\textbf{Final hypothesis (excerpt):}
+\begin{quote}
+ Database (MySQL) Connection Failure or Query Execution Issue
+\end{quote}
+
+\textbf{Evidence (excerpt):}
+\begin{lstlisting}
+ {"type": "log", "description": "Error logs indicating MySQL connection timeouts or execution errors"}
+ {"type": "history", "description": "Previous incidents where similar database errors led to system downtime"}
+\end{lstlisting}
+
+\textbf{Judge assessment:}
+ The judge assigns a high score (\textbf{judge\_score=98}) because the hypothesis combines specific log evidence with consistent historical patterns, while also noting missing alternative causes (e.g., network issues or resource contention).
+
+\section{CMCC Case Study: ECONNREFUSED Leads to Misclassification}
+\textbf{Dataset:} CMCC (OpenStack)\\
+\textbf{Ground truth:} AMQP\\
+\textbf{Predicted:} CreateErrorNovaConductor (incorrect)\\
+ \textbf{Case ID:} \texttt{13b91f38af528dac}\\
+\textbf{Interpretation:} This illustrates symptom-level ambiguity: AMQP/RabbitMQ failures can surface as service-level failures in Nova components.
+
+\textbf{Final hypothesis (excerpt):}
+\begin{quote}
+ Network connectivity issue preventing RabbitMQ from establishing connection with Nova conductor service.
+\end{quote}
+
+\textbf{Evidence (excerpt):}
+\begin{lstlisting}
+ "The log shows repeated attempts to connect over time, followed by consistent failure due to ECONNREFUSED errors."
+ "Log events 13-20 show exponential increase in retry intervals, indicating persistent attempts but consistent failure."
+\end{lstlisting}
+
+ \textbf{Judge assessment:}
+ The judge score (\textbf{judge\_score=87}) reflects strong symptom-level evidence (connection refused) but also highlights ambiguity: network failures in RabbitMQ can be reported downstream as OpenStack service errors, which can shift the predicted class.
+
+\section{HDFS\_v1 Case Study: Block Metadata Deletion Failure}
+\textbf{Dataset:} HDFS\_v1\\
+\textbf{Ground truth:} Anomaly\\
+\textbf{Predicted:} Anomaly\\
+ \textbf{Block ID:} \texttt{blk\_7308851742195780214}\\
+\textbf{Source file:} \texttt{docs/HDFS\_validation\_results/HDFS\_MULTI\_AGENT\_RESULTS.json}
+
+\textbf{Final hypothesis (excerpt):}
+\begin{quote}
+Corrupt or missing block metadata caused deletion failures.
+\end{quote}
+
+\textbf{Log evidence (excerpt):}
+\begin{lstlisting}
+[081111 075945] dfs.FSDataset: Unexpected error trying to delete block ...
+[081111 075817] dfs.FSDataset: Deleting block ...
+[081111 075927] dfs.FSDataset: Deleting block ...
+[081111 075935] dfs.FSDataset: Deleting block ...
+...
+\end{lstlisting}
+
+\textbf{Why the judge selected it:}
+ The judge feedback explicitly connects the error signature (\texttt{BlockInfo not found in volumeMap} / deletion failures) to missing or corrupted metadata and selects the hypothesis due to its clear causal chain and concrete remediation (replication checks and repair). In this case, the selected hypothesis has \textbf{judge\_score=85}.

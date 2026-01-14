@@ -1,0 +1,278 @@
+\section{Overview}
+This chapter describes the implementation details of \systemname{}, focusing on the technical choices that enable reproducible evaluation of multi-agent LLM-based RCA. We cover the technology stack, local LLM inference, structured output handling, knowledge graph implementation, validation pipelines, baseline implementations, and reproducibility considerations.
+
+The implementation prioritizes three goals:
+\begin{enumerate}
+  \item \textbf{Reproducibility}: all experiments can be re-run without external API dependencies.
+  \item \textbf{Scalability}: the pipeline can process hundreds of incidents without manual intervention.
+  \item \textbf{Transparency}: intermediate outputs are logged for post-hoc analysis and debugging.
+\end{enumerate}
+
+\section{Technology Stack}
+The system is built on the following technology stack:
+
+\subsection{Programming Language and Framework}
+\begin{itemize}
+  \item \textbf{Python 3.10+}: the primary implementation language, chosen for its rich ecosystem of ML/NLP libraries and ease of prototyping.
+  \item \textbf{Pydantic}: used for data validation and schema enforcement in agent inputs/outputs.
+  \item \textbf{asyncio}: used for asynchronous orchestration of agent calls where applicable.
+\end{itemize}
+
+\subsection{LLM Infrastructure}
+\begin{itemize}
+  \item \textbf{Ollama}: local LLM inference server that provides a unified API for running open-source models.
+  \item \textbf{Models}: qwen2:7b, mistral:7b, llama2:7b (all 7B-parameter class models).
+  \item \textbf{Inference}: HTTP API calls to the local Ollama server with configurable temperature, max tokens, and stop sequences.
+\end{itemize}
+
+\subsection{Knowledge Graph}
+\begin{itemize}
+  \item \textbf{Neo4j 5.x}: graph database for storing incidents, entities, and relationships.
+  \item \textbf{Cypher}: query language for graph traversal and retrieval.
+  \item \textbf{py2neo / neo4j-driver}: Python client libraries for Neo4j interaction.
+\end{itemize}
+
+\subsection{Data Processing}
+\begin{itemize}
+  \item \textbf{pandas}: used for loading and manipulating tabular data (e.g., CMCC CSV files).
+  \item \textbf{JSON}: standard format for structured agent inputs/outputs and artifact storage.
+  \item \textbf{scikit-learn}: used for computing evaluation metrics (precision, recall, F1).
+\end{itemize}
+
+\section{Local LLM Inference}
+We use Ollama to run local 7B-class models to ensure reproducibility and avoid external API dependencies. In our experiments, Qwen2:7B is used for structured extraction and some reasoning, Mistral:7B for log reasoning and judging in some pipelines, and LLaMA2:7B for KG-focused reasoning.
+
+Running locally has two practical benefits for RCA research: (i) the full pipeline can be executed without network access or paid APIs, and (ii) the exact model versions and inference settings can be logged and reproduced. In addition, a local setup is better aligned with operational environments where sensitive logs cannot leave the organization.
+
+\subsection{Model selection rationale}
+The choice of 7B-class models reflects a practical tradeoff between capability and resource requirements. Larger models (13B, 70B) may offer improved reasoning but require more GPU memory and longer inference times. For the multi-agent pipeline, where each incident requires 8--15 LLM calls, inference latency is a significant factor.
+
+We selected models from different families (Qwen2, Mistral, LLaMA2) to provide implicit diversity in the reasoning process. This is not strictly necessary---the system could run with a single model family---but it reduces the risk that all reasoners share the same blind spots.
+
+From a foundation-model perspective, these models benefit from the broader ecosystem of transformer-based pretraining and instruction tuning \cite{vaswani2023attentionneed,ouyang2022traininglanguagemodelsfollow}. Open foundation models such as LLaMA demonstrate that strong general-purpose language modeling can be achieved with efficient training \cite{touvron2023llamaopenefficientfoundation}.
+
+\subsection{Inference configuration}
+Each agent is configured with specific inference parameters:
+\begin{itemize}
+  \item \textbf{Temperature}: controls sampling randomness. Low temperatures (0.2) for structured extraction and judging; moderate temperatures (0.7) for reasoning.
+  \item \textbf{Max tokens}: limits output length to prevent runaway generation.
+  \item \textbf{Stop sequences}: used to terminate generation at expected boundaries (e.g., end of JSON array).
+\end{itemize}
+
+These parameters are stored in configuration files and logged with each experiment for reproducibility.
+
+\subsection{Prompted structured outputs}
+A recurring engineering challenge is that LLM outputs must be machine-readable to support large-scale evaluation. We therefore design agent prompts to request strict JSON outputs. For example, the reasoners are asked to output a JSON array of 3--5 hypotheses, each with a fixed set of fields (hypothesis statement, confidence, reasoning, evidence, affected components, and suggested resolution). The judge is asked to return a JSON array with per-criterion scores and feedback.
+
+In the orchestration layer, these outputs are validated and parsed. If an output is malformed (e.g., missing brackets or containing trailing commentary), the system can apply a constrained re-prompt or a lightweight repair strategy (e.g., extracting the first JSON array substring). This design is essential for running experiments across many cases without manual intervention.
+
+\subsection{Controlling non-determinism}
+LLM inference is inherently stochastic when sampling is enabled. For components where determinism matters (e.g., structured extraction in the parser), we use conservative decoding configurations (low temperature and limited sampling). For open-ended reasoning components, some stochasticity is acceptable, but we mitigate variance by keeping prompts stable and using a fixed maximum number of debate rounds.
+
+\section{Knowledge Graph Implementation}
+Neo4j 5.x is used as the graph database. Incidents and entities are populated using dataset-specific scripts and linked via explicit relationships. Similarity search is implemented using entity overlap and incident metadata.
+
+Knowledge graphs provide a flexible mechanism to represent entities, incidents, and relations, supporting entity-centric retrieval and reasoning over multi-hop relations \cite{hogan2021knowledge}. In AIOps contexts, KGs can store historical incidents and their diagnosed root causes, enabling recurrence reasoning when a new incident shares entities or patterns with prior cases \cite{cui2025aetherlog}.
+
+\subsection{Graph schema and indexing}
+The KG is incident-centric: each historical case is represented as an incident node connected to entities (services, hosts, components) and optionally to error types and root-cause labels. This schema supports two usage patterns:
+\begin{enumerate}
+  \item \textbf{Entity-centric retrieval}: find past incidents that share entities with the current case.
+  \item \textbf{Explanation support}: surface concise historical summaries and known resolutions that can be cited as supporting evidence.
+\end{enumerate}
+
+We keep the schema lightweight to reduce ingestion complexity and to avoid overfitting to any single dataset. For example, an HDFS-related incident may contain entities such as NameNode/DataNode and block identifiers, while OpenStack incidents contain service names (Nova, Neutron, Keystone) and connection endpoints.
+
+\subsection{Data ingestion}
+Dataset-specific ingestion scripts populate the KG:
+\begin{itemize}
+  \item \textbf{Hadoop1}: incidents are created from application directories, with entities extracted from log file names and error messages.
+  \item \textbf{CMCC}: incidents are created from CSV records, with entities extracted from OpenStack service names and connection endpoints.
+  \item \textbf{HDFS\_v1}: incidents are created from block traces, with entities corresponding to block IDs and DataNode identifiers.
+\end{itemize}
+
+Ingestion is incremental: as the evaluation pipeline processes incidents, successful diagnoses (with high judge scores) are added to the KG for future retrieval. This simulates an operational setting where the KG grows over time.
+
+\subsection{Retrieval queries}
+Retrieval is implemented as Cypher queries that score candidates by shared entities and optionally by incident metadata (e.g., error signatures). The result is a compact set of retrieved facts (similar incidents, likely causal paths, and typical resolutions) that are provided to the KG-focused and hybrid reasoners.
+
+A typical retrieval query follows this pattern:
+\begin{enumerate}
+  \item Match incident nodes that share at least one entity with the current incident.
+  \item Score by the number of shared entities and the final score of the historical incident.
+  \item Return the top-$k$ matches (default $k=5$) with their root causes and resolution summaries.
+\end{enumerate}
+
+While more advanced retrieval (e.g., semantic embedding search) is possible, entity overlap retrieval is simple, interpretable, and robust to log statement drift across versions.
+
+\subsection{Neo4j configuration}
+We use Neo4j Community Edition 5.x with default configuration. For the dataset sizes in our evaluation (tens to hundreds of incidents), no special tuning is required. Larger deployments would benefit from:
+\begin{itemize}
+  \item Indexes on entity names and incident IDs for faster lookup.
+  \item Connection pooling for high-throughput retrieval.
+  \item Periodic compaction to manage graph size over time.
+\end{itemize}
+
+\section{Validation Pipelines}
+We implement dataset-specific validation scripts:
+\begin{itemize}
+  \item \texttt{scripts/validate\_ground\_truth.py}: Hadoop1 evaluation (strict and coarse labels).
+  \item \texttt{scripts/validate\_cmcc.py}: CMCC evaluation (7-class OpenStack failures).
+  \item \texttt{scripts/validate\_hdfs.py}: HDFS\_v1 evaluation (binary anomaly detection).
+\end{itemize}
+Each validation script executes the selected pipeline (single-agent, RAG baseline, or multi-agent debate), normalizes predictions to the dataset label space, and computes accuracy, precision, recall, and macro-\fone{}.
+
+\subsection{Pipeline execution flow}
+The validation pipeline for each incident follows these steps:
+\begin{enumerate}
+  \item \textbf{Load incident}: read log files or CSV records and associate with ground-truth labels.
+  \item \textbf{Parse logs}: invoke the Log Parser Agent to extract structured events, entities, and errors.
+  \item \textbf{Retrieve context}: invoke the KG Retrieval Agent to find similar historical incidents.
+  \item \textbf{Generate hypotheses}: invoke the three reasoners (Log, KG, Hybrid) to produce competing hypotheses.
+  \item \textbf{Judge and select}: invoke the Judge Agent to score hypotheses and select the best one.
+  \item \textbf{Normalize prediction}: map the selected hypothesis to a dataset label.
+  \item \textbf{Record results}: store predictions, scores, and metadata for analysis.
+\end{enumerate}
+
+For baseline pipelines (single-agent, RAG), steps 4--5 are simplified: only one hypothesis is generated and no judging is performed.
+
+\subsection{Prediction normalization}
+Because the LLMs produce free-text hypotheses, the system normalizes outputs into the label space required for evaluation. This step is dataset-specific:
+\begin{itemize}
+  \item For Hadoop1 strict and coarse schemes, predictions are mapped into the corresponding fault classes (with an explicit \texttt{unknown} outcome when mapping fails).
+  \item For CMCC, predictions are mapped into the seven OpenStack failure categories.
+  \item For HDFS\_v1, predictions are mapped into \texttt{Anomaly} vs \texttt{Normal}.
+\end{itemize}
+Normalization is implemented with conservative keyword-based rules and guardrails to avoid over-interpreting ambiguous outputs. We treat this step as a threat to validity and discuss it in Chapter~7.
+
+\subsection{Normalization rules}
+The normalizer applies a sequence of pattern-matching rules:
+\begin{enumerate}
+  \item \textbf{Exact match}: check if the hypothesis contains an exact label keyword (e.g., ``machine\_down'').
+  \item \textbf{Synonym expansion}: check for known synonyms (e.g., ``node failure'' $\rightarrow$ \texttt{machine\_down}, ``disk space'' $\rightarrow$ \texttt{disk\_full}).
+  \item \textbf{Category inference}: for CMCC, check for service-specific keywords (e.g., ``MySQL'' $\rightarrow$ \texttt{Mysql}, ``RabbitMQ'' $\rightarrow$ \texttt{AMQP}).
+  \item \textbf{Default to unknown}: if no confident match is found, output \texttt{unknown}.
+\end{enumerate}
+
+This conservative approach may undercount correct diagnoses that use unexpected terminology, but it reduces the risk of false positives from aggressive pattern matching.
+
+\subsection{Logging and artifact storage}
+For reproducibility, the validation scripts store intermediate artifacts such as parsed events, retrieved KG summaries, reasoner hypotheses, judge scores, and final normalized predictions. These artifacts enable qualitative analysis (case studies) and make it possible to inspect failure cases without re-running the full pipeline.
+
+Artifacts are stored in JSON format with the following structure:
+\begin{itemize}
+  \item \texttt{incident\_id}: unique identifier for the incident.
+  \item \texttt{ground\_truth}: the true label from the dataset.
+  \item \texttt{parsed\_events}: output of the Log Parser Agent.
+  \item \texttt{kg\_context}: retrieved historical context.
+  \item \texttt{hypotheses}: list of hypotheses from all reasoners.
+  \item \texttt{judge\_scores}: scores and feedback from the Judge Agent.
+  \item \texttt{final\_hypothesis}: the selected hypothesis.
+  \item \texttt{predicted\_label}: the normalized prediction.
+\end{itemize}
+
+\section{Orchestration Layer}
+The orchestration layer coordinates the multi-agent pipeline and handles cross-cutting concerns such as error handling, retry logic, and progress tracking.
+
+\subsection{Error handling}
+LLM outputs can fail in several ways:
+\begin{itemize}
+  \item \textbf{Malformed JSON}: the output is not valid JSON.
+  \item \textbf{Missing fields}: required fields are absent from the output.
+  \item \textbf{Timeout}: the LLM takes too long to respond.
+  \item \textbf{Empty output}: the LLM returns an empty response.
+\end{itemize}
+
+The orchestration layer handles these failures with a retry strategy:
+\begin{enumerate}
+  \item Attempt to parse the output.
+  \item If parsing fails, retry with an explicit format reminder in the prompt.
+  \item If retry fails, attempt lightweight repair (e.g., extract JSON substring).
+  \item If all attempts fail, use a fallback (e.g., empty hypothesis list, \texttt{unknown} prediction).
+\end{enumerate}
+
+\subsection{Progress tracking}
+For large-scale evaluation, the orchestration layer tracks progress and supports resumption:
+\begin{itemize}
+  \item Completed incidents are logged to a checkpoint file.
+  \item If the pipeline is interrupted, it can resume from the last checkpoint.
+  \item Progress is reported periodically (e.g., every 10 incidents).
+\end{itemize}
+
+\section{Reproducibility Considerations}
+The implementation is designed to be portable:
+\begin{itemize}
+  \item the LLM backend runs locally via Ollama,
+  \item the knowledge layer runs on Neo4j,
+  \item all experiments are executed via scripts that take dataset paths and configuration options.
+\end{itemize}
+This choice reduces external dependencies and makes the evaluation pipeline suitable for environments where logs cannot be uploaded to third-party services.
+
+\subsection{Version control}
+All code, prompts, and configuration files are version-controlled. This enables:
+\begin{itemize}
+  \item Tracking changes to prompts and their effects on results.
+  \item Reproducing specific experiment configurations.
+  \item Sharing the implementation for external validation.
+\end{itemize}
+
+\subsection{Hardware requirements}
+The system was developed and evaluated on a workstation with:
+\begin{itemize}
+  \item CPU: modern multi-core processor (8+ cores recommended).
+  \item RAM: 32 GB minimum for running 7B models.
+  \item GPU: optional but recommended for faster inference (NVIDIA GPU with 8+ GB VRAM).
+  \item Storage: 50+ GB for model weights and experiment artifacts.
+\end{itemize}
+
+Without GPU acceleration, inference is slower but still feasible. The multi-agent pipeline takes 3--5 minutes per incident on CPU; with GPU, this reduces to 1--2 minutes.
+
+\subsection{Future directions for implementation}
+Several implementation improvements are planned for future work:
+\begin{itemize}
+  \item \textbf{Batched inference}: process multiple incidents in parallel to improve throughput.
+  \item \textbf{Streaming outputs}: support real-time display of reasoning progress.
+  \item \textbf{API integration}: expose the pipeline as a REST API for integration with observability platforms.
+  \item \textbf{Fine-tuning support}: integrate parameter-efficient fine-tuning methods (LoRA, QLoRA) for domain adaptation \cite{hu2021loralowrankadaptationlarge,dettmers2023qloraefficientfinetuningquantized}.
+\end{itemize}
+
+\section{Single-Agent Baseline Implementation}
+To provide a fair comparison, we implement a single-agent baseline that uses the same underlying LLM infrastructure but without the multi-agent debate protocol.
+
+\subsection{Baseline architecture}
+The single-agent baseline consists of:
+\begin{enumerate}
+  \item \textbf{Log parsing}: same Log Parser Agent as the multi-agent system.
+  \item \textbf{Single reasoner}: one LLM call that receives the parsed incident and generates a diagnosis directly.
+  \item \textbf{No KG retrieval}: the baseline does not use historical context (for the pure single-agent variant).
+  \item \textbf{No judging}: the single hypothesis is accepted without evaluation.
+\end{enumerate}
+
+\subsection{RAG baseline variant}
+We also implement a RAG baseline that adds KG retrieval to the single-agent architecture:
+\begin{enumerate}
+  \item \textbf{Log parsing}: same as above.
+  \item \textbf{KG retrieval}: same KG Retrieval Agent as the multi-agent system.
+  \item \textbf{Single reasoner with context}: one LLM call that receives both the parsed incident and retrieved historical context.
+  \item \textbf{No judging}: the single hypothesis is accepted without evaluation.
+\end{enumerate}
+
+This RAG baseline isolates the contribution of retrieval from the contribution of multi-agent debate.
+
+\subsection{Prompt consistency}
+To ensure fair comparison, the single-agent and RAG baselines use prompts that are structurally similar to the multi-agent reasoner prompts. The key differences are:
+\begin{itemize}
+  \item Single-agent prompts ask for a single best hypothesis rather than 3--5 alternatives.
+  \item Single-agent prompts do not mention debate or refinement.
+  \item RAG prompts include retrieved context in the same format as the Hybrid reasoner.
+\end{itemize}
+
+\subsection{Runtime comparison}
+The baselines are significantly faster than the multi-agent pipeline:
+\begin{itemize}
+  \item \textbf{Single-agent}: 1 LLM call, ~30 seconds per incident.
+  \item \textbf{RAG}: 1 LLM call + KG query, 30--45 seconds per incident.
+  \item \textbf{Multi-agent}: 8--15 LLM calls, 3--5 minutes per incident.
+\end{itemize}
+
+This runtime difference is important context for interpreting the results: the multi-agent system achieves better performance at the cost of higher compute.

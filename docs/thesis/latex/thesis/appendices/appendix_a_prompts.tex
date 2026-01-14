@@ -1,0 +1,58 @@
+This appendix includes key prompt templates used by \systemname{}. Prompts are reproduced from the implementation for transparency and reproducibility.
+
+\section{Log-Focused Reasoner Prompt}
+\begin{lstlisting}
+(See src/agents/rca_log_reasoner.py: LogFocusedReasoner._build_reasoning_prompt)
+You are an expert system administrator analyzing log data for root cause analysis.
+...
+Provide 3-5 root cause hypotheses in JSON array format...
+\end{lstlisting}
+
+\section{KG-Focused Reasoner Prompt}
+\begin{lstlisting}
+(See src/agents/rca_kg_reasoner.py: KGFocusedReasoner._build_reasoning_prompt)
+You are an expert in root cause analysis using historical incident data and knowledge graphs.
+...
+Provide 3-5 root cause hypotheses in JSON array format...
+\end{lstlisting}
+
+\section{Hybrid Reasoner Prompt}
+\begin{lstlisting}
+(See src/agents/rca_hybrid_reasoner.py: HybridReasoner._build_reasoning_prompt)
+You are an expert in comprehensive root cause analysis, combining real-time log analysis with historical knowledge.
+...
+Provide 3-5 root cause hypotheses in JSON array format...
+\end{lstlisting}
+
+\section{Judge Evaluation Prompt}
+\begin{lstlisting}
+(See src/agents/judge_agent.py: JudgeAgent._build_evaluation_prompt)
+You are an expert judge evaluating root cause analysis hypotheses.
+...
+Return a JSON array with evaluations for each hypothesis with a total score (0-100).
+\end{lstlisting}
+
+\section{Dataset-Specific Baseline Prompts}
+\subsection{Hadoop1 Single-Agent Baseline}
+\begin{lstlisting}
+(See scripts/validate_ground_truth.py: SingleAgentBaselineAgent._build_prompt)
+You are an SRE root-cause analyst. Given Hadoop/YARN container logs, infer the most likely root cause.
+Return ONLY a JSON object with keys: hypothesis, category, confidence, suggested_resolution.
+...
+\end{lstlisting}
+
+\subsection{CMCC Single-Agent Baseline}
+\begin{lstlisting}
+(See scripts/validate_cmcc.py: CMCCSingleAgentBaseline._build_prompt)
+You are an SRE root-cause analyst specializing in OpenStack cloud infrastructure.
+IMPORTANT: You must classify the failure into ONE of these specific categories: AMQP, Mysql, Down, ...
+Return ONLY a JSON object...
+\end{lstlisting}
+
+\subsection{HDFS\_v1 Single-Agent Baseline}
+\begin{lstlisting}
+(See scripts/validate_hdfs.py: HDFSSingleAgentBaseline._build_prompt)
+You are an SRE analyst specializing in Hadoop HDFS.
+Given logs for a specific block, determine if this is Normal or Anomaly.
+Return ONLY a JSON object...
+\end{lstlisting}

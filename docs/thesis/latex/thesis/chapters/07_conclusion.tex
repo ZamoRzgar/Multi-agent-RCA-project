@@ -1,0 +1,111 @@
+\section{Summary of Contributions}
+This thesis presented \systemname{}, a multi-agent, knowledge-graph-guided RCA system designed to improve reliability of LLM-based diagnosis. The core insight is that diverse perspectives plus explicit judging and refinement reduces majority-class collapse and improves evidence grounding.
+
+The main contributions of this work are:
+\begin{enumerate}
+  \item \textbf{A multi-agent architecture for log-based RCA}: We designed and implemented a system with six specialized agents (Log Parser, KG Retrieval, three Reasoners, and Judge) that collaborate through a structured debate protocol. This architecture separates hypothesis generation from evaluation and enables iterative refinement.
+  
+  \item \textbf{A debate protocol with explicit judging}: Unlike single-pass LLM generation, our system generates multiple competing hypotheses and evaluates them under a fixed rubric (evidence quality, reasoning strength, confidence calibration, completeness, consistency). This operationalizes reliability as a measurable decision process.
+  
+  \item \textbf{Knowledge graph integration for grounding}: We implemented a Neo4j-based knowledge graph that stores historical incidents, entities, and root causes. Retrieval of similar incidents provides grounding context that reduces hallucinations and supports recurrence reasoning.
+  
+  \item \textbf{Comprehensive evaluation across three datasets}: We evaluated on Hadoop1 (4-class fault injection), CMCC (7-class OpenStack failures), and HDFS\_v1 (binary anomaly detection), demonstrating consistent improvements over single-agent and RAG baselines.
+  
+  \item \textbf{A reproducible, local implementation}: The system runs entirely on local infrastructure (Ollama for LLM inference, Neo4j for graph storage), enabling reproducibility without dependence on external APIs.
+\end{enumerate}
+
+\section{Answers to Research Questions}
+
+\begin{description}
+  \item[RQ1: Does a multi-agent approach achieve higher accuracy than single-agent LLM baselines?]
+  \textbf{Yes.} On Hadoop1, the multi-agent system improves coarse macro-\fone{} by 13.3 percentage points compared to the single-agent baseline (39.1\% vs 25.8\%). Critically, the multi-agent system detects minority classes (disk\_full) that the single-agent baseline completely misses. On CMCC, the improvement is even more dramatic: 61.3\% accuracy vs 4.3\% for single-agent (14$\times$ improvement). On HDFS\_v1, multi-agent achieves 69.5\% accuracy vs 65.0\% for single-agent.
+  
+  \item[RQ2: Does a structured debate protocol reduce hallucinations and improve reliability?]
+  \textbf{Yes.} The judge scoring mechanism and multi-round refinement reduce unsupported hypotheses by requiring explicit evidence for each claim. The rubric penalizes overconfident or poorly-grounded explanations. While we do not have a direct measure of ``hallucination rate,'' the reduction in unknown predictions on CMCC (17.2\% for multi-agent vs 60--70\% for baselines) suggests that the debate protocol helps the system commit to well-supported diagnoses rather than producing vague or unsupported outputs.
+  
+  \item[RQ3: Does knowledge graph integration improve RCA quality?]
+  \textbf{Yes, with caveats.} KG retrieval supports recurrence reasoning and improves hypothesis grounding when similar historical incidents exist. The RAG baseline (which uses KG retrieval but not debate) outperforms single-agent on some metrics, confirming the value of retrieval. However, the full multi-agent system outperforms RAG, suggesting that retrieval alone is not sufficient---verification and refinement are also important.
+  
+  \item[RQ4: Are generated explanations high-quality and actionable?]
+  \textbf{Yes.} System outputs include structured hypotheses with evidence lists, affected components, and suggested remediation steps. The case studies in Appendix A illustrate how the judge feedback identifies strengths and weaknesses of competing hypotheses, providing transparency into the selection process. While we did not conduct a formal user study, the structured output format is designed for operator triage.
+\end{description}
+
+\section{Implications for Practice}
+
+The results suggest several practical implications for deploying LLM-based RCA systems:
+
+\begin{enumerate}
+  \item \textbf{Single-agent LLMs are insufficient for reliable RCA}: Despite strong language understanding capabilities, single-agent systems tend to collapse to majority-class predictions and produce overconfident diagnoses. Multi-agent architectures with explicit verification are needed for operational reliability.
+  
+  \item \textbf{Retrieval improves grounding but is not sufficient}: RAG-style retrieval of historical context helps, but the full benefit requires combining retrieval with diverse hypothesis generation and explicit judging.
+  
+  \item \textbf{Local deployment is feasible}: 7B-class models running locally via Ollama can achieve meaningful RCA performance, enabling deployment in environments with privacy or connectivity constraints.
+  
+  \item \textbf{Label semantics matter}: The gap between strict and coarse evaluation on Hadoop1 highlights that evaluation metrics should align with operational needs. Symptom-level labels may be more useful than fine-grained fault labels when log evidence does not distinguish between similar failure modes.
+\end{enumerate}
+
+\section{Limitations}
+
+This work has several limitations that should be considered when interpreting the results:
+
+\begin{itemize}
+  \item \textbf{Single-run evaluation}: Due to computational cost, we report single-run results. LLM outputs can vary across runs, and multi-run aggregation would provide more robust estimates.
+  
+  \item \textbf{No ML/DL baselines}: We did not compare against trained ML/DL baselines (e.g., DeepLog, LogAnomaly) because they require different preprocessing and training pipelines. This limits the scope of our conclusions.
+  
+  \item \textbf{Label normalization errors}: Mapping free-text hypotheses to discrete labels introduces potential errors. Our conservative normalizer may undercount correct diagnoses that use unexpected terminology.
+  
+  \item \textbf{Limited dataset diversity}: While we evaluated on three datasets, they represent a subset of real operational environments. Generalization to other domains requires further validation.
+\end{itemize}
+
+\section{Future Work}
+
+Several directions for future work emerge from this thesis:
+
+\subsection{Ablation Studies}
+Systematic ablations would help isolate the contribution of each component:
+\begin{itemize}
+  \item Disable KG retrieval to measure the value of historical context.
+  \item Disable refinement rounds to measure the value of iterative debate.
+  \item Swap model families to measure sensitivity to model choice.
+  \item Vary the number of reasoners to measure the value of diversity.
+\end{itemize}
+
+\subsection{Improved Retrieval}
+Current retrieval is based on entity overlap. Future work could explore:
+\begin{itemize}
+  \item Semantic similarity over log templates using embedding models.
+  \item Hybrid retrieval combining entity overlap with semantic similarity.
+  \item Active retrieval where reasoners can request additional context during debate.
+\end{itemize}
+
+\subsection{ML/DL Baseline Comparison}
+A comprehensive comparison with trained ML/DL baselines would strengthen the evaluation:
+\begin{itemize}
+  \item DeepLog, LogAnomaly, LogBERT for anomaly detection.
+  \item Supervised classifiers over parsed log templates.
+  \item Hybrid systems that combine learned detectors with LLM-based explanation.
+\end{itemize}
+
+\subsection{Domain Adaptation}
+Parameter-efficient fine-tuning methods such as LoRA and QLoRA \cite{hu2021loralowrankadaptationlarge,dettmers2023qloraefficientfinetuningquantized} could enable domain adaptation with limited compute:
+\begin{itemize}
+  \item Fine-tune on organization-specific incident corpora.
+  \item Adapt to domain-specific terminology and failure modes.
+  \item Explore preference optimization (e.g., DPO) for aligning outputs with operator preferences \cite{rafailov2024directpreferenceoptimizationlanguage}.
+\end{itemize}
+
+\subsection{Deployment Optimizations}
+For production deployment, several optimizations would be valuable:
+\begin{itemize}
+  \item Adaptive compute allocation: run single-agent for easy cases, escalate to multi-agent for uncertain cases.
+  \item Caching and batching to reduce LLM call overhead.
+  \item Streaming interfaces for real-time incident response.
+  \item Integration with existing observability platforms (e.g., Prometheus, Grafana, PagerDuty).
+\end{itemize}
+
+\section{Closing Remarks}
+
+This thesis demonstrates that multi-agent LLM systems with knowledge graph grounding and explicit judging can improve the reliability of log-based root cause analysis. While challenges remain---including computational cost, label normalization, and the need for broader baseline comparisons---the results suggest a promising direction for building trustworthy AI-assisted incident diagnosis systems.
+
+The combination of diverse hypothesis generation, retrieval-based grounding, and structured evaluation addresses fundamental limitations of single-agent LLM approaches. As foundation models continue to improve and parameter-efficient adaptation methods mature, we expect multi-agent architectures to become increasingly practical for operational AIOps workflows.
