@@ -22,16 +22,40 @@ We adopt a layered design to separate concerns and improve reproducibility:
 
 \begin{figure}[H]
 \centering
-\begin{tikzpicture}[node distance=1.0cm, font=\small]
-  \tikzstyle{box}=[draw, rounded corners, align=center, minimum width=3.5cm, minimum height=0.8cm]
-  \node[box] (logs) {Raw Logs};
-  \node[box, below=of logs] (parser) {Log Parser Agent\\(structured events/entities)};
-  \node[box, below=of parser] (kg) {KG Retrieval Agent\\(similar incidents)};
-  \node[box, below left=0.8cm and -1.8cm of kg] (logr) {Log-Focused Reasoner};
-  \node[box, below=0.8cm of kg] (hyb) {Hybrid Reasoner};
-  \node[box, below right=0.8cm and -1.8cm of kg] (kgr) {KG-Focused Reasoner};
-  \node[box, below=of hyb] (judge) {Judge Agent\\(scores + feedback)};
-  \node[box, below=of judge] (out) {Final Hypothesis\\+ Category + Resolution};
+\begin{tikzpicture}[node distance=0.6cm, font=\small,
+    layer/.style={rectangle, draw=black, thick, minimum width=11cm, minimum height=1cm, align=center},
+    component/.style={rectangle, draw=blue!60, fill=blue!10, thick, minimum width=1.6cm, minimum height=0.6cm, align=center, rounded corners=2pt, font=\footnotesize}
+]
+% Layers (bottom to top)
+\node[layer, fill=gray!15] (infra) at (0,0) {\textbf{Infrastructure}: Ollama (LLM) + Neo4j (Graph DB)};
+\node[layer, fill=yellow!10] (knowledge) at (0,1.3) {\textbf{Knowledge}: Incident KG + Similarity Retrieval};
+\node[layer, fill=blue!8] (agent) at (0,2.6) {\textbf{Agent}: Parser, KG Retrieval, 3 Reasoners, Judge};
+\node[layer, fill=orange!10] (orch) at (0,3.9) {\textbf{Orchestration}: Debate Protocol + Workflow Control};
+\node[layer, fill=green!8] (pres) at (0,5.2) {\textbf{Presentation}: Evaluation Scripts + Result Collection};
+
+% Arrows showing data flow
+\draw[->, thick, gray] (pres.south) -- (orch.north);
+\draw[->, thick, gray] (orch.south) -- (agent.north);
+\draw[->, thick, gray] (agent.south) -- (knowledge.north);
+\draw[->, thick, gray] (knowledge.south) -- (infra.north);
+\end{tikzpicture}
+\caption{Layered architecture of \systemname{}. Each layer has well-defined responsibilities and interfaces with adjacent layers through structured data contracts.}
+\label{fig:architecture}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.8cm, font=\small,
+    box/.style={draw, rounded corners, align=center, minimum width=3.2cm, minimum height=0.7cm}
+]
+  \node[box, fill=gray!10] (logs) {Raw Logs};
+  \node[box, fill=blue!10, below=of logs] (parser) {Log Parser Agent};
+  \node[box, fill=yellow!10, below=of parser] (kg) {KG Retrieval Agent};
+  \node[box, fill=green!10, below left=0.6cm and -1.5cm of kg] (logr) {Log Reasoner};
+  \node[box, fill=green!10, below=0.6cm of kg] (hyb) {Hybrid Reasoner};
+  \node[box, fill=green!10, below right=0.6cm and -1.5cm of kg] (kgr) {KG Reasoner};
+  \node[box, fill=orange!15, below=0.6cm of hyb] (judge) {Judge Agent};
+  \node[box, fill=blue!15, below=of judge] (out) {Final Hypothesis};
 
   \draw[->] (logs) -- (parser);
   \draw[->] (parser) -- (kg);
@@ -42,8 +66,12 @@ We adopt a layered design to separate concerns and improve reproducibility:
   \draw[->] (hyb) -- (judge);
   \draw[->] (kgr) -- (judge);
   \draw[->] (judge) -- (out);
+  
+  % Feedback loop annotation
+  \draw[->, dashed, thick, red!60] (judge.east) -- ++(1.2,0) -- ++(0,2.4) -- (kgr.east);
+  \node[font=\tiny, red!60, anchor=west] at (4.2,-3.5) {Refinement};
 \end{tikzpicture}
-\caption{End-to-end multi-agent RCA pipeline in \systemname{}.}
+\caption{End-to-end multi-agent RCA pipeline. Three reasoners generate competing hypotheses; the judge scores and selects the best one. Dashed arrow indicates optional refinement rounds.}
 \label{fig:pipeline}
 \end{figure}
 
@@ -179,7 +207,58 @@ The judge returns a JSON array containing, for each hypothesis:
 This structured output enables both automated selection (pick the highest-scoring hypothesis) and human review (inspect the reasoning behind the selection).
 
 \section{Debate Protocol}
-The system runs for up to 3 rounds. In each round, reasoners generate hypotheses; the judge scores them and provides feedback; and reasoners refine hypotheses based on feedback and other agents' best hypotheses. The debate stops when scores plateau or the maximum rounds are reached.
+The system runs for up to 3 rounds. In each round, reasoners generate hypotheses; the judge scores them and provides feedback; and reasoners refine hypotheses based on feedback and other agents' best hypotheses. The debate stops when scores plateau or the maximum rounds are reached. Figure~\ref{fig:debate} illustrates the debate flow.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.7cm, font=\small,
+    process/.style={rectangle, draw=blue!60, fill=blue!10, thick, minimum width=2.2cm, minimum height=0.7cm, align=center, rounded corners=3pt},
+    decision/.style={diamond, draw=orange!60, fill=orange!10, thick, minimum width=1.2cm, align=center, aspect=2.5, font=\footnotesize},
+    data/.style={rectangle, draw=green!60, fill=green!10, thick, minimum width=1.8cm, minimum height=0.6cm, align=center, rounded corners=2pt}
+]
+% Input
+\node[data] (input) at (0,0) {Parsed Logs + KG};
+
+% Three reasoners
+\node[process, minimum width=1.6cm] (log) at (-3,-1.5) {Log\\Reasoner};
+\node[process, minimum width=1.6cm] (kg) at (0,-1.5) {KG\\Reasoner};
+\node[process, minimum width=1.6cm] (hybrid) at (3,-1.5) {Hybrid\\Reasoner};
+
+% Hypotheses
+\node[data, minimum width=3cm] (hypos) at (0,-3) {9--15 Hypotheses};
+
+% Judge
+\node[process, fill=yellow!20, draw=yellow!60] (judge) at (0,-4.5) {Judge Agent};
+
+% Scores
+\node[data, minimum width=2.5cm] (scores) at (0,-6) {Scores + Feedback};
+
+% Decision
+\node[decision] (converge) at (0,-7.5) {Done?};
+
+% Output
+\node[data, fill=green!25] (output) at (3,-7.5) {Final Hypothesis};
+
+% Refinement
+\node[process, fill=purple!10, draw=purple!60, minimum width=1.6cm] (refine) at (-3,-7.5) {Refine};
+
+% Arrows
+\draw[->] (input) -- (log);
+\draw[->] (input) -- (kg);
+\draw[->] (input) -- (hybrid);
+\draw[->] (log) -- (hypos);
+\draw[->] (kg) -- (hypos);
+\draw[->] (hybrid) -- (hypos);
+\draw[->] (hypos) -- (judge);
+\draw[->] (judge) -- (scores);
+\draw[->] (scores) -- (converge);
+\draw[->] (converge) -- node[above, font=\tiny] {Yes} (output);
+\draw[->] (converge) -- node[above, font=\tiny] {No} (refine);
+\draw[->] (refine) -- (-3,-1.5);
+\end{tikzpicture}
+\caption{Multi-agent debate protocol flow. Three reasoners generate hypotheses in parallel; the judge evaluates and provides feedback; refinement continues until convergence or max rounds (3).}
+\label{fig:debate}
+\end{figure}
 
 The debate protocol is formalized in Algorithm~\ref{alg:debate}.
 

@@ -1,0 +1,66 @@
+% Figure 2: Multi-Agent Debate Protocol Flow
+% This figure shows the debate protocol with hypothesis generation, judging, and refinement
+
+\begin{tikzpicture}[
+    node distance=1cm,
+    process/.style={rectangle, draw=blue!60, fill=blue!10, thick, minimum width=2.5cm, minimum height=1cm, align=center, rounded corners=5pt},
+    decision/.style={diamond, draw=orange!60, fill=orange!10, thick, minimum width=1.5cm, minimum height=1cm, align=center, aspect=2},
+    data/.style={rectangle, draw=green!60, fill=green!10, thick, minimum width=2cm, minimum height=0.8cm, align=center, rounded corners=3pt},
+    arrow/.style={->, thick, >=stealth},
+    label/.style={font=\footnotesize}
+]
+
+% Input
+\node[data] (input) at (0,0) {Parsed Logs\\+ KG Context};
+
+% Three reasoners (parallel)
+\node[process] (log) at (-4,-2) {Log\\Reasoner};
+\node[process] (kg) at (0,-2) {KG\\Reasoner};
+\node[process] (hybrid) at (4,-2) {Hybrid\\Reasoner};
+
+% Hypotheses collection
+\node[data, minimum width=4cm] (hypos) at (0,-4) {9--15 Hypotheses};
+
+% Judge
+\node[process, fill=yellow!20, draw=yellow!60] (judge) at (0,-6) {Judge\\Agent};
+
+% Scores and feedback
+\node[data, minimum width=3cm] (scores) at (0,-8) {Scores +\\Feedback};
+
+% Decision
+\node[decision] (converge) at (0,-10) {Converged?};
+
+% Output
+\node[data, fill=green!30] (output) at (4,-10) {Final\\Hypothesis};
+
+% Refinement loop
+\node[process, fill=purple!10, draw=purple!60] (refine) at (-4,-10) {Refine with\\Feedback};
+
+% Arrows
+\draw[arrow] (input) -- (log);
+\draw[arrow] (input) -- (kg);
+\draw[arrow] (input) -- (hybrid);
+
+\draw[arrow] (log) -- (hypos);
+\draw[arrow] (kg) -- (hypos);
+\draw[arrow] (hybrid) -- (hypos);
+
+\draw[arrow] (hypos) -- (judge);
+\draw[arrow] (judge) -- (scores);
+\draw[arrow] (scores) -- (converge);
+
+\draw[arrow] (converge) -- node[above, label] {Yes} (output);
+\draw[arrow] (converge) -- node[above, label] {No} (refine);
+
+% Loop back
+\draw[arrow] (refine) -- (-4,-2.8);
+
+% Round labels
+\node[label, anchor=east] at (-5.5,-2) {Round $r$};
+\node[label, anchor=west] at (5.5,-6) {Evaluate on 5 criteria};
+\node[label, anchor=west] at (5.5,-8) {Max 3 rounds};
+
+% Title annotation
+\node[font=\small\itshape, anchor=north] at (0,-11.5) {Debate continues until scores plateau or max rounds reached};
+
+\end{tikzpicture}
