@@ -68,8 +68,8 @@ We adopt a layered design to separate concerns and improve reproducibility:
   \draw[->] (judge) -- (out);
   
   % Feedback loop annotation
-  \draw[->, dashed, thick, red!60] (judge.east) -- ++(1.5,0) -- ++(0,2.8) -- (kgr.east);
-  \node[font=\tiny, red!60, anchor=west] at (5.0,-4.2) {Refinement};
+  \draw[->, dashed, thick, red!60] (judge.east) -- ++(2.5,0) -- ++(0,3.5) -- (kgr.east);
+  \node[font=\tiny, red!60, anchor=west] at (6.0,-4.5) {Refinement};
 \end{tikzpicture}
 \caption{End-to-end multi-agent RCA pipeline. Three reasoners generate competing hypotheses; the judge scores and selects the best one. Dashed arrow indicates optional refinement rounds.}
 \label{fig:pipeline}
