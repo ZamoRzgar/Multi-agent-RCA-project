@@ -27,8 +27,9 @@
 \pgfplotsset{compat=1.18}
 \usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc}
 
-% GB/T 7714-2015 numeric style (BibTeX)
-\usepackage[numbers,sort&compress]{natbib}
+% GB/T 7714-2015 numeric style
+\usepackage{gbt7714}
+\bibliographystyle{gbt7714-numerical}
 
 \hypersetup{colorlinks=true, linkcolor=blue, urlcolor=cyan, citecolor=blue}
 
@@ -108,7 +109,6 @@
 \input{appendices/appendix_b_case_studies}
 
 \clearpage
-\bibliographystyle{unsrt}
 \bibliography{references}
 
 \end{document}
