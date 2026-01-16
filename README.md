@@ -1,250 +1,164 @@
 # Multi-Agent Knowledge-Graph-Guided RCA System
 
-A novel multi-agent framework for reliable log-based root cause analysis (RCA) using Large Language Models and knowledge graphs. This system addresses hallucinations and tunnel vision in single-LLM approaches through collaborative agent debate and structured reasoning.
+A multi-agent framework for reliable log-based root cause analysis (RCA) using Large Language Models and knowledge graphs. The system addresses hallucinations and tunnel vision in single-LLM approaches through collaborative agent debate and structured reasoning.
 
-## 🎯 Project Overview
+## Overview
 
-Single-LLM systems for root cause analysis often suffer from:
-- **Hallucinations**: Making unsupported claims not grounded in logs or facts
-- **Tunnel vision**: Missing alternative explanations and causal chains
-- **Limited reasoning**: Inability to cross-check hypotheses against multiple perspectives
+This system implements a **multi-agent debate protocol** where specialized LLM agents with different analytical perspectives generate competing hypotheses for root cause analysis. A judge agent evaluates and selects the best hypothesis based on evidence quality and reasoning.
 
-**Multi Agent** solves these problems through:
-- **Multi-agent collaboration**: Specialized agents with different analytical perspectives
-- **Knowledge graph grounding**: Shared memory of historical incidents and causal relationships
-- **Structured debate**: Agents critique, refine, and converge on accurate explanations
-- **Judge mechanism**: Evidence-based selection of the best root cause hypothesis
+**Key Features:**
+- **Multi-agent collaboration**: Log Reasoner, KG Reasoner, and Hybrid Reasoner generate diverse hypotheses
+- **Knowledge graph grounding**: Neo4j-based incident memory for historical context retrieval
+- **Structured debate**: Up to 3 rounds of hypothesis generation, judging, and refinement
+- **Local LLM inference**: Runs entirely on local hardware via Ollama (Qwen2, Mistral, LLaMA2)
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Log Input (Failure Case)                 │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-              ┌──────────────────────┐
-              │   Log Parser Agent   │
-              │  (Extract entities,  │
-              │   events, timeline)  │
-              └──────────┬───────────┘
-                         │
-                         ▼
-              ┌──────────────────────┐
-              │ KG Retrieval Agent   │
-              │ (Fetch relevant KG   │
-              │  facts & relations)  │
-              └──────────┬───────────┘
-                         │
-         ┌───────────────┼───────────────┐
-         │               │               │
-         ▼               ▼               ▼
-    ┌────────┐     ┌────────┐     ┌────────┐
-    │  RCA   │     │  RCA   │     │  RCA   │
-    │Reasoner│     │Reasoner│     │Reasoner│
-    │  (Log) │     │  (KG)  │     │(Hybrid)│
-    └───┬────┘     └───┬────┘     └───┬────┘
-        │              │              │
-        └──────────────┼──────────────┘
-                       │
-                       ▼
-            ┌──────────────────┐
-            │  Debate Protocol │
-            │ (Critique, Refine,│
-            │   Cross-check)   │
-            └─────────┬────────┘
-                      │
-                      ▼
-            ┌──────────────────┐
-            │   Judge Agent    │
-            │ (Score & Select  │
-            │ best explanation)│
-            └─────────┬────────┘
-                      │
-                      ▼
-         ┌────────────────────────┐
-         │  Final RCA Prediction  │
-         │   + Explanation        │
-         └────────────────────────┘
+│                  Presentation Layer                          │
+│            (Evaluation Scripts, Result Collection)           │
+├─────────────────────────────────────────────────────────────┤
+│                  Orchestration Layer                         │
+│            (Debate Protocol, Workflow Control)               │
+├─────────────────────────────────────────────────────────────┤
+│                     Agent Layer                              │
+│   Log Parser → KG Retrieval → 3 Reasoners → Judge           │
+├─────────────────────────────────────────────────────────────┤
+│                   Knowledge Layer                            │
+│            (Incident KG, Similarity Retrieval)               │
+├─────────────────────────────────────────────────────────────┤
+│                 Infrastructure Layer                         │
+│              (Ollama LLM, Neo4j Graph DB)                    │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## 📁 Project Structure (Changed)
+**Pipeline Flow:**
+1. **Log Parser Agent** → Extracts structured events, entities, and timeline
+2. **KG Retrieval Agent** → Fetches similar historical incidents from Neo4j
+3. **Three Reasoners** → Generate competing hypotheses (Log-focused, KG-focused, Hybrid)
+4. **Judge Agent** → Scores hypotheses and provides feedback
+5. **Refinement** → Reasoners refine based on feedback (up to 3 rounds)
+6. **Final Output** → Best hypothesis with root cause category and resolution
+
+## Project Structure
 
 ```
 log/
-├── src/                          # Source code
-│   ├── agents/                   # Agent implementations
-│   │   ├── log_parser.py        # Log parsing agent
-│   │   ├── kg_retrieval.py      # KG retrieval agent
-│   │   ├── rca_reasoner.py      # RCA reasoning agents
-│   │   └── judge.py             # Judge agent
-│   ├── kg/                       # Knowledge graph modules
-│   │   ├── builder.py           # KG construction
-│   │   ├── query.py             # KG querying
-│   │   └── schema.py            # KG schema definitions
-│   ├── debate/                   # Debate protocol
-│   │   ├── protocol.py          # Debate orchestration
-│   │   └── scoring.py           # Hypothesis scoring
-│   ├── utils/                    # Utilities
-│   │   ├── llm_client.py        # LLM API wrapper
-│   │   ├── log_parser.py        # Log parsing utilities
-│   │   └── metrics.py           # Evaluation metrics
-│   └── evaluation/               # Evaluation framework
-│       ├── baselines.py         # Baseline implementations
-│       └── evaluator.py         # Evaluation orchestration
-├── data/                         # Data directory
-│   ├── raw/                     # Raw log datasets
-│   ├── processed/               # Processed logs
-│   └── kg/                      # Knowledge graph storage
-├── experiments/                  # Experiments
-│   ├── baselines/               # Baseline experiments
-│   └── results/                 # Experiment results
-├── docs/                         # Documentation
-│   ├── architecture/            # Architecture diagrams
-│   └── design/                  # Design documents
-├── tests/                        # Tests
-│   ├── unit/                    # Unit tests
-│   └── integration/             # Integration tests
-├── config/                       # Configuration files
-│   └── config.yaml              # Main configuration
-├── logs/                         # Application logs
-├── requirements.txt              # Python dependencies
-├── .env.example                 # Environment variables template
-└── README.md                    # This file
+├── src/
+│   ├── agents/
+│   │   ├── log_parser.py          # Log parsing and entity extraction
+│   │   ├── kg_retrieval.py        # KG similarity retrieval
+│   │   ├── rca_log_reasoner.py    # Log-focused hypothesis generation
+│   │   ├── rca_kg_reasoner.py     # KG-focused hypothesis generation
+│   │   ├── rca_hybrid_reasoner.py # Hybrid hypothesis generation
+│   │   └── judge_agent.py         # Hypothesis evaluation and scoring
+│   ├── debate/
+│   │   └── protocol.py            # Multi-agent debate orchestration
+│   ├── kg/
+│   │   ├── builder.py             # Knowledge graph construction
+│   │   └── query.py               # KG querying utilities
+│   └── utils/
+│       └── local_llm_client.py    # Ollama LLM client
+├── config/
+│   └── config.yaml                # Model and agent configuration
+├── data/
+│   ├── Hadoop1/                   # Hadoop dataset (55 cases)
+│   ├── CMCC/                      # CMCC OpenStack dataset (93 cases)
+│   └── HDFS_v1/                   # HDFS dataset (200 sampled blocks)
+├── experiments/
+│   └── results/                   # Evaluation results
+├── docs/
+│   └── thesis/                    # Thesis documentation
+└── loghub/                        # LogHub datasets
 ```
 
-## 🚀 Getting Started
+## Quick Start
 
 ### Prerequisites
-
 - Python 3.9+
-- Neo4j 5.0+ (for knowledge graph storage)
-
+- Ollama (for local LLM inference)
+- Neo4j 5.0+ (for knowledge graph)
 
 ### Installation
 
-1. **Clone the repository** (if using git):
 ```bash
-cd /home/zamo/projects/log
-```
+# 1. Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
 
-2. **Create virtual environment**:
-```bash
+# 2. Download models
+ollama pull qwen2:7b
+ollama pull mistral:7b
+ollama pull llama2:7b
+
+# 3. Set up Python environment
+
 python -m venv venv
-source venv/bin/activate  # On Linux/Mac
-```
-
-3. **Install dependencies**:
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
-```
 
-4. **Set up environment variables**:
-```bash
+# 4. Start Neo4j
+sudo systemctl start neo4j
+
+# 5. Configure environment
 cp .env.example .env
-# Edit .env with your API keys and configuration
+# Edit .env with Neo4j credentials
 ```
 
-5. **Install Neo4j** (for knowledge graph):
+### Running Evaluation
+
 ```bash
-# Follow Neo4j installation guide for your OS
-# https://neo4j.com/docs/operations-manual/current/installation/
+# Run multi-agent evaluation on Hadoop1
+python -m experiments.run_evaluation --dataset hadoop1 --pipeline multi-agent
+
+# Run single-agent baseline
+python -m experiments.run_evaluation --dataset hadoop1 --pipeline single-agent
+
+# Run RAG baseline
+python -m experiments.run_evaluation --dataset hadoop1 --pipeline rag
 ```
 
-6. **Download spaCy model** (for NLP):
-```bash
-python -m spacy download en_core_web_sm
-```
+## Evaluation Results
 
-### Configuration
+Evaluated on three datasets with macro-F1 scores:
 
-Edit `config/config.yaml` to customize:
-- LLM provider and model selection
-- Agent parameters (temperature, max tokens)
-- Debate protocol settings
-- Knowledge graph configuration
-- Evaluation metrics
+| Dataset | Multi-Agent | RAG | Single-Agent |
+|---------|-------------|-----|--------------|
+| Hadoop1 (Coarse) | **39.1%** | 37.9% | 25.8% |
+| CMCC | **52.4%** | 7.8% | 3.9% |
+| HDFS_v1 | **69.4%** | 63.0% | 56.8% |
 
-## 📊 Research Questions
+The multi-agent system shows consistent improvements, with the largest gains on CMCC (+48.5 pp over single-agent).
 
-**RQ1 – Accuracy**: Does multi-agent KG-guided RCA achieve higher accuracy than single-LLM + KG baseline?
+## Model Configuration
 
-**RQ2 – Reliability**: Does agent debate + KG grounding reduce hallucinations compared to single-LLM and self-consistency?
+| Agent | Model | Temperature | Purpose |
+|-------|-------|-------------|---------|
+| Log Parser | Qwen2-7B | 0.2 | Structured extraction |
+| KG Retrieval | Qwen2-7B | 0.3 | Query generation |
+| Log Reasoner | Mistral-7B | 0.7 | Log-based hypotheses |
+| KG Reasoner | LLaMA2-7B | 0.7 | KG-based hypotheses |
+| Hybrid Reasoner | Qwen2-7B | 0.7 | Combined hypotheses |
+| Judge | Mistral-7B | 0.2 | Evaluation and scoring |
 
-**RQ3 – Explanation Quality**: Do multi-agent explanations score higher in correctness, clarity, and evidence-use?
+## Datasets
 
-**RQ4 – Agent Dynamics**: How does agent agreement/disagreement relate to correctness?
+- **Hadoop1** (LogHub): 55 labeled applications with 4 fault types
+- **CMCC** (LogKG): 93 OpenStack failure cases with 7 failure types  
+- **HDFS_v1** (LogHub): 575,061 block traces, evaluated on 200 balanced samples
 
-**RQ5 – Cost vs Benefit**: What is the computational overhead and is it acceptable for practical RCA workflows?
+## Documentation
 
-## 🧪 Usage
+- **Thesis**: `docs/thesis/latex/thesis/` - Full LaTeX thesis with methodology and results
+- **Setup Guide**: `SETUP_INSTRUCTIONS.md` - Detailed local LLM setup
 
-### Basic Usage
+## Hardware Requirements
 
-```python
-from src.agents import LogParserAgent, KGRetrievalAgent, RCAReasonerAgent, JudgeAgent
-from src.debate import DebateProtocol
-from src.kg import KnowledgeGraph
+**Minimum**: 8GB RAM, 4 CPU cores, 15GB disk (runs 1 model at a time)  
+**Recommended**: 16GB+ RAM, NVIDIA GPU with 8GB+ VRAM, 30GB disk
 
-# Initialize components
-log_parser = LogParserAgent()
-kg_retrieval = KGRetrievalAgent()
-reasoners = [
-    RCAReasonerAgent(focus="log"),
-    RCAReasonerAgent(focus="kg"),
-    RCAReasonerAgent(focus="hybrid")
-]
-judge = JudgeAgent()
-debate = DebateProtocol(reasoners, judge)
+## Acknowledgments
 
-# Process log case
-log_case = load_log_case("data/raw/case_001.log")
-parsed_logs = log_parser.parse(log_case)
-kg_facts = kg_retrieval.retrieve(parsed_logs)
-
-# Run debate and get final prediction
-result = debate.run(parsed_logs, kg_facts)
-print(f"Root Cause: {result.root_cause}")
-print(f"Explanation: {result.explanation}")
-```
-
-
-
-## 📈 Evaluation Metrics
-
-- **Accuracy / F1 Score**: Root cause identification correctness
-- **Hallucination Rate**: Percentage of unsupported claims in explanations
-- **Explanation Quality**: Human-rated correctness, clarity, and evidence-use
-- **Agent Agreement**: Consensus level among reasoning agents
-- **Latency & Cost**: Computational overhead vs single-agent methods
-
-## 🗓️ Development Timeline
-
-- **Phase 1** (Weeks 1-3): Literature review & problem formulation ✓
-- **Phase 2** (Weeks 4-6): System design & architecture
-- **Phase 3** (Weeks 5-8): Knowledge graph construction
-- **Phase 4** (Weeks 8-12): Multi-agent implementation
-- **Phase 5** (Weeks 12-15): Baselines & evaluation setup
-- **Phase 6** (Weeks 15-19): Experiments & analysis
-
-## 🔬 Datasets
-
-This project uses:
-- currently using loghub datasets like hadoop, hdfs, spark
-
-## 🤝 Contributing
-
-This is a research project. For collaboration inquiries, please contact the project maintainer.
-
-
-
-
-
-## 🙏 Acknowledgments
-
-
-- Inspired by "Society of Minds" multi-agent debate approaches
-- Built with local models like qwen and deepseek
-
-
-**Status**: 🚧 Under Development
+- Inspired by multi-agent debate approaches for improving LLM factuality
+- Built with Ollama for local inference and Neo4j for knowledge graph storage
+- Datasets from LogHub and LogKG benchmarks

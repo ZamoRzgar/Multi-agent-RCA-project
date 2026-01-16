@@ -117,3 +117,7 @@ docs/HADOOP1_GROUND_TRUTH_RESULTS.json
 docs/unused_results/
 docs/cmcc_results/
 docs/HDFS_validation_results/
+project-description.md
+project-abstract.md
+CONDA_SETUP.md
+

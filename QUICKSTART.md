@@ -1,142 +1,166 @@
 # Quick Start Guide
 
-## Initial Setup (10 minutes)
+Get the multi-agent RCA system running in ~15 minutes.
 
-> **💡 Recommendation**: Use **Conda** instead of venv for this project!  
-> See `CONDA_SETUP.md` for full Conda instructions (easier and better for ML/AI).
+## Prerequisites
 
-### Option A: Conda (Recommended ⭐)
+- Python 3.9+
+- 8GB+ RAM (16GB recommended)
+- 15GB disk space for models
+
+## Step 1: Install Ollama (2 min)
 
 ```bash
-cd /home/zamo/projects/log
+# Install Ollama for local LLM inference
+curl -fsSL https://ollama.com/install.sh | sh
 
-# Create environment with Python 3.10 + all dependencies
-conda env create -f environment.yml
-
-# Activate
-conda activate multimodel-rca
-
-# Install spaCy model
-python -m spacy download en_core_web_sm
+# Verify installation
+ollama --version
 ```
 
-### Option B: venv (Traditional)
+## Step 2: Download Models (10 min)
+
+```bash
+# Download required models
+ollama pull qwen2:7b      # ~4.4GB - Structured tasks
+ollama pull mistral:7b    # ~4.1GB - Reasoning
+ollama pull llama2:7b     # ~3.8GB - General purpose
+
+# Verify models
+ollama list
+```
+
+## Step 3: Python Environment (2 min)
 
 ```bash
 cd /home/zamo/projects/log
-python3 -m venv venv
+
+# Create and activate virtual environment
+python -m venv venv
 source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-python -m spacy download en_core_web_sm
 ```
 
-### 3. Configure Environment
-```bash
-cp .env.example .env
-# Edit .env and add your API keys:
-# - OPENAI_API_KEY or ANTHROPIC_API_KEY
-# - NEO4J_PASSWORD (if using Neo4j)
-```
+## Step 4: Neo4j Setup (3 min)
 
-### 4. Install Neo4j (Optional - for KG features)
 ```bash
 # Ubuntu/Debian
-wget -O - https://debian.neo4j.com/neotechnology.gpg.key | sudo apt-key add -
-echo 'deb https://debian.neo4j.com stable latest' | sudo tee /etc/apt/sources.list.d/neo4j.list
 sudo apt-get update
 sudo apt-get install neo4j
 
 # Start Neo4j
 sudo systemctl start neo4j
+
+# Verify running
+curl http://localhost:7474
 ```
 
-## Testing the Setup
-
-### Run Tests (when implemented)
+Configure Neo4j credentials:
 ```bash
-pytest tests/
+cp .env.example .env
+# Edit .env with:
+# NEO4J_URI=bolt://localhost:7687
+# NEO4J_USER=neo4j
+# NEO4J_PASSWORD=your_password
 ```
 
-### Test Individual Components
-```python
-# Test LLM client
-python -c "from src.utils.llm_client import LLMClient; client = LLMClient(); print('LLM client OK')"
-
-# Test agent initialization
-python -c "from src.agents import LogParserAgent; agent = LogParserAgent(); print('Agents OK')"
-```
-
-## Next Steps
-
-1. **Phase 2: System Design**
-   - Create architectural diagrams in `docs/architecture/`
-   - Design debate protocol details
-   - Define data schemas
-
-2. **Phase 3: Knowledge Graph**
-   - Prepare historical log data in `data/raw/`
-   - Implement KG construction pipeline
-   - Build initial KG
-
-3. **Phase 4: Agent Implementation**
-   - Complete LLM integration in agents
-   - Implement log parsing logic
-   - Build debate mechanism
-
-## Development Workflow
+## Step 5: Verify Setup
 
 ```bash
-# Activate environment
-source venv/bin/activate
+# Test Ollama is running
+curl http://localhost:11434/api/tags
 
-# Run main system (once implemented)
-python src/main.py --log-file data/raw/sample.log
+# Test a model
+ollama run qwen2:7b "What is root cause analysis?" --verbose
+# Press Ctrl+D to exit
 
-# Run experiments
-python experiments/run_evaluation.py
-
-# Build knowledge graph
-python src/kg/builder.py --input data/raw/historical_logs/
+# Test Python imports
+python -c "from src.agents import LogParserAgent; print('OK')"
 ```
 
-## Project Structure Overview
+## Running Experiments
 
+### Multi-Agent Pipeline
+```bash
+python -m experiments.run_evaluation --dataset hadoop1 --pipeline multi-agent
 ```
-src/
-├── agents/          # All agent implementations ✓
-├── kg/             # Knowledge graph modules ✓
-├── debate/         # Debate protocol ✓
-└── utils/          # Utilities (LLM client, etc.) ✓
 
-config/             # Configuration files ✓
-data/              # Data storage ✓
-experiments/       # Experiment scripts (TODO)
-docs/             # Documentation (TODO)
-tests/            # Test suite (TODO)
+### Baselines
+```bash
+# Single-agent (no KG, no debate)
+python -m experiments.run_evaluation --dataset hadoop1 --pipeline single-agent
+
+# RAG (KG retrieval, no debate)
+python -m experiments.run_evaluation --dataset hadoop1 --pipeline rag
 ```
+
+### Available Datasets
+- `hadoop1` - 55 Hadoop failure cases
+- `cmcc` - 93 OpenStack failure cases
+- `hdfs` - 200 HDFS block traces
+
+## Configuration
+
+Edit `config/config.yaml` to customize:
+- Model assignments per agent
+- Temperature settings
+- Debate rounds (default: 3)
+- Neo4j connection
 
 ## Troubleshooting
 
-**Import errors**: Make sure virtual environment is activated
+**Ollama not responding:**
 ```bash
-source venv/bin/activate
+# Check if running
+ps aux | grep ollama
+
+# Restart
+pkill ollama && ollama serve
 ```
 
-**API key errors**: Check `.env` file has correct keys
+**Out of memory:**
 ```bash
-cat .env | grep API_KEY
+# Use quantized models
+ollama pull mistral:7b-instruct-q4_0
 ```
 
-**Neo4j connection errors**: Ensure Neo4j is running
+**Neo4j connection failed:**
 ```bash
 sudo systemctl status neo4j
+sudo systemctl restart neo4j
+```
+
+**Import errors:**
+```bash
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Project Structure
+
+```
+src/
+├── agents/           # 6 agent implementations
+│   ├── log_parser.py
+│   ├── kg_retrieval.py
+│   ├── rca_log_reasoner.py
+│   ├── rca_kg_reasoner.py
+│   ├── rca_hybrid_reasoner.py
+│   └── judge_agent.py
+├── debate/           # Debate protocol
+├── kg/               # Knowledge graph
+└── utils/            # LLM client, helpers
+
+data/                 # Datasets (Hadoop1, CMCC, HDFS)
+experiments/          # Evaluation scripts
+docs/thesis/          # Thesis documentation
 ```
 
 ## Resources
 
-- **OpenAI API**: https://platform.openai.com/docs/api-reference
-- **Anthropic API**: https://docs.anthropic.com/claude/reference
-- **Neo4j Docs**: https://neo4j.com/docs/
-- **Drain3 Parser**: https://github.com/logpai/Drain3
+- **Ollama**: https://ollama.com/
+- **Neo4j**: https://neo4j.com/docs/
+- **LogHub**: https://github.com/logpai/loghub
+- **Setup Details**: See `SETUP_INSTRUCTIONS.md`
