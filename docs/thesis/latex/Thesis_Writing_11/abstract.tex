@@ -1,0 +1,79 @@
+% -*- coding: utf-8 -*-
+
+\begin{zhaiyao}
+
+现代分布式系统产生大量日志数据，这些数据对于诊断故障和执行根因分析（RCA）至关重要。
+基于规则和统计的方法难以扩展到异构云原生环境，且通常缺乏可操作的解释。
+大型语言模型（LLM）为日志理解和解释生成提供了新的接口；
+然而，单一LLM的RCA存在幻觉、上下文有限以及缺乏验证等问题。
+
+本文提出\systemname{}，一种多智能体、知识图谱引导的RCA系统，
+通过以下方式提高可靠性：
+（i）多个LLM智能体之间的专业化分工；
+（ii）具有显式评判机制的结构化辩论协议。
+系统由六个智能体组成：日志解析器、知识图谱检索智能体、
+三个RCA推理智能体（日志聚焦、KG聚焦和混合型）
+以及一个评判智能体，该智能体根据证据质量、推理强度、置信度校准、
+完整性和一致性对竞争假设进行评分。
+
+实验在三个数据集上进行评估：
+LogHub的Hadoop1（55个标记应用，4类故障）、
+LogKG的CMCC（93个工业OpenStack故障案例，7类）
+以及HDFS\_v1（来自575,061个HDFS块跟踪的200个平衡样本，二进制异常检测）。
+在Hadoop1上，\systemname{}粗粒度宏观F1比单智能体基线提高了13.3个百分点（39.1\% vs 25.8\%）。
+在CMCC上，多智能体系统达到61.3\%的准确率，
+而单智能体和RAG基线均崩溃为"未知"或多数类预测。
+在HDFS\_v1上，\systemname{}实现了69.5\%的准确率和69.4\%的平衡宏观F1。
+
+实验结果支持多智能体辩论通过交叉验证假设、
+减少多数类崩溃并产生基于证据的解释来提高事实性和鲁棒性的假设。
+
+\end{zhaiyao}
+
+\begin{guanjianci}
+根因分析；日志分析；大型语言模型；多智能体系统；知识图谱；辩论协议；AIOps
+\end{guanjianci}
+
+
+\begin{abstract}
+
+Modern distributed systems generate massive volumes of logs that are essential for diagnosing
+failures and performing root cause analysis (RCA). While rule-based and statistical approaches
+can detect known patterns, they struggle to scale to heterogeneous cloud-native environments
+and often lack actionable explanations. Recent Large Language Models (LLMs) provide a new
+interface for log understanding and explanation generation; however, single-LLM RCA suffers
+from hallucinations, limited context, and the absence of verification.
+
+This thesis presents \systemname{}, a multi-agent, knowledge-graph-guided RCA system that
+improves reliability through (i)~specialization across multiple LLM agents and (ii)~a
+structured debate protocol with an explicit judge. The system consists of six agents:
+a Log Parser for structured extraction, a Knowledge Graph (KG) Retrieval Agent for
+historical grounding, three RCA Reasoners (log-focused, KG-focused, and hybrid), and a
+Judge Agent that scores competing hypotheses on evidence quality, reasoning strength,
+confidence calibration, completeness, and consistency. The knowledge layer is implemented
+in Neo4j and stores incidents, entities, and root-cause relations to support retrieval and
+recurrence analysis.
+
+We evaluate \systemname{} on three datasets: Hadoop1 from LogHub (55 labeled applications,
+4 fault classes), CMCC from LogKG (93 industrial OpenStack failure cases, 7 classes), and
+HDFS\_v1 (200 balanced samples from 575,061 HDFS block traces, binary anomaly detection).
+On Hadoop1, \systemname{} improves coarse macro-\fone{} by +13.3 percentage points over a
+single-agent baseline (39.1\% vs 25.8\%) and detects minority faults such as disk\_full
+(36.4\% \fone{} vs 0\%). On CMCC, the multi-agent system achieves 61.3\% accuracy while
+the single-agent and RAG baselines collapse to ``unknown'' or majority-class predictions,
+providing strong evidence for cross-domain generalizability on real industrial logs.
+On HDFS\_v1, \systemname{} achieves 69.5\% accuracy and a balanced macro-\fone{} of 69.4\%,
+outperforming single-agent (65.0\%) and RAG (63.0\%) baselines.
+
+Overall, the results support the hypothesis that multi-agent debate improves factuality
+and robustness by cross-validating hypotheses, reducing majority-class collapse, and
+producing evidence-grounded explanations. We discuss limitations such as label ambiguity,
+dataset-specific KG coverage, and computational overhead, and we outline future work
+including larger-scale ablations, stronger retrieval, and additional ML/DL baselines.
+
+\end{abstract}
+
+\begin{keywords}
+Root Cause Analysis, Log Analysis, Large Language Models, Multi-Agent Systems,
+Knowledge Graphs, Debate, AIOps
+\end{keywords}
