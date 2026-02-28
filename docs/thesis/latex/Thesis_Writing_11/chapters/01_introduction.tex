@@ -2,159 +2,207 @@
 
 \chapter{Introduction}
 
-\section{Problem Statement}
-Modern distributed systems generate massive volumes of log data that are critical for understanding
-system behavior, diagnosing failures, and performing root cause analysis (RCA). As cloud-native
-architectures become increasingly complex---spanning microservices, container orchestration
-platforms, and distributed storage systems---the challenge of analyzing logs to identify root causes
-has grown exponentially. In many organizations, logs remain the primary, always-on telemetry source,
-complementing metrics and traces, and serving as the first artifact consulted during incident
-response.
+\section{The Role of Logs in Modern Operations}
 
-Traditional log-based RCA relies on manual inspection by system administrators or rule-based pattern
-matching. These approaches face fundamental limitations:
-\begin{enumerate}
-  \item \textbf{Scale}: Production systems can emit millions of log lines per hour.
-  \item \textbf{Complexity}: Failures propagate across components and layers, requiring correlation.
-  \item \textbf{Domain knowledge}: Effective RCA depends on historical experience and
-        system-specific context.
-  \item \textbf{Timeliness}: Incidents demand fast diagnosis, but manual workflows are slow.
-\end{enumerate}
+Logs are the most pervasive and continuously available telemetry in modern software systems.
+Unlike metrics, which aggregate numerical measurements, or distributed traces, which require
+explicit instrumentation at the call level, logs are emitted by virtually every system component
+as a natural by-product of execution~\cite{he2020loghub}. They record timestamped events,
+exception messages, state transitions, and resource identifiers in semi-structured natural
+language, making them the primary artifact that on-call engineers consult when a failure occurs.
+In cloud-native architectures that span microservices, container orchestration platforms, and
+distributed storage systems, a single production incident may leave traces across dozens of
+components simultaneously, each producing its own log stream. Correlating and interpreting these
+streams within the tight time windows demanded by service-level objectives (SLOs) is a task that
+has grown in difficulty commensurate with the growth of system scale and
+complexity~\cite{zhang2024cloudRCAsurvey}.
 
-In addition, operational logs are notoriously heterogeneous. They contain free-form natural language
-text, evolving templates due to software updates, and environment-specific identifiers. Even when a
-system has structured logging conventions, failures may surface across different components with
-partially overlapping symptoms.
+The practical importance of log analysis has motivated a substantial body of research in automated
+log parsing, anomaly detection, and failure diagnosis. Log parsers such as Drain convert raw,
+free-form log messages into structured event templates by masking variable
+tokens~\cite{he2017drain,zhu2019tools}. These templates serve as the input to downstream analytical
+pipelines, enabling quantitative comparison of log behaviors across time windows. However, log
+analysis and root cause analysis (RCA) are distinct tasks with different objectives: while log
+analysis broadly encompasses anomaly detection, classification, and summarization, RCA is
+specifically concerned with identifying the underlying causal fault that produced an observable
+incident and providing an actionable explanation for operators. This thesis is concerned
+exclusively with the RCA task.
 
-To make logs more amenable to automated analysis, a large body of work studies log parsing and
-template mining, where raw messages are mapped into templates (events) by masking variable tokens.
-This transformation enables downstream statistical analysis and learning over event sequences. For
-example, Drain is a widely used online parser that supports efficient template
-matching~\cite{he2017drain}. Beyond parsing, learning-based anomaly detection methods such as
-DeepLog model normal execution patterns from sequences of templates and detect
-deviations~\cite{du2017deeplog}. However, despite strong performance in controlled benchmarks, the
-effectiveness of deep learning methods can be sensitive to windowing choices, dataset assumptions,
-and the stability of logging statements across versions~\cite{le2022logdlhowfar,zhang2019logrobust}.
+\section{Root Cause Analysis: Definition and Challenges}
 
-In addition to manual and rule-based RCA, a large body of ML/DL work targets log-based anomaly
-detection and diagnosis (e.g., supervised classifiers over parsed templates and sequence models such
-as DeepLog and LogAnomaly). In this thesis, we treat these approaches as out of scope for the main
-comparison because they typically require dataset-specific training and hyperparameter tuning (and
-often distinct preprocessing/feature pipelines), while our goal is to evaluate an
-explanation-oriented, KG-grounded, multi-agent LLM system in a zero/few-shot setting. We include
-ML/DL baselines as future work.
+Root cause analysis is the process of tracing an observed failure back to its primary causal
+factor, as distinct from its immediate symptoms. In a microservice system, for example, a
+database connection timeout may surface as an HTTP 500 error in an upstream API; the symptom is
+the HTTP error, but the root cause is the database unavailability. Correct identification of the
+root cause is prerequisite to effective remediation: treating the symptom (e.g., restarting the
+upstream service) without addressing the root cause (e.g., the exhausted database connection pool)
+will not prevent recurrence~\cite{meng2020localizing,wu2020microrca}.
 
-\section{Why LLM-Based RCA Is Promising but Unreliable}
-Large Language Models (LLMs) provide a new interface for log understanding: given a set of log lines
-or extracted events, an LLM can generate a natural-language hypothesis, justify it with cited
-evidence, and propose remediation steps. This aligns well with the needs of operators, who require
-not only a predicted label but also a rationale that can be validated quickly.
+The RCA task in production environments faces several well-documented challenges that are
+difficult to address simultaneously. First, production systems emit logs at a rate that makes
+manual inspection infeasible. A single Hadoop cluster, for example, can emit hundreds of thousands
+of log lines per job execution, as evidenced by the Hadoop1 benchmark used in this
+thesis~\cite{he2020loghub}. Engineers cannot review this volume manually during an active incident.
+Second, failures in distributed systems rarely confine themselves to a single component. Fault
+propagation across service dependencies means that the failure signal in the logs of the faulty
+component may be temporally and spatially separated from the logs of the component that originally
+triggered the cascade~\cite{wang2018cloudranger,chen2014causeinfer}. Third, the heterogeneity
+of log formats across different software stacks, versions, and configurations means that pattern
+matching rules and templates crafted for one system are rarely transferable to another without
+substantial manual effort~\cite{zhang2019logrobust}. Fourth, logs encode domain-specific
+terminology and operational conventions that require contextual knowledge to interpret correctly.
+An error string like ``BlockInfo not found in volumeMap'' is diagnostic only to an engineer who
+knows the semantics of HDFS block management. Capturing and operationalizing this domain knowledge
+at scale is a fundamental bottleneck in automated RCA.
 
-At the same time, single-LLM RCA is often unreliable. Two structural issues are particularly
-relevant:
-\begin{enumerate}
-  \item \textbf{Grounding}: when the prompt does not contain sufficient evidence, an LLM may fill
-        gaps with plausible-sounding but unsupported details.
-  \item \textbf{Verification}: even when evidence is present, a single model instance may commit to
-        a hypothesis without cross-checking alternatives or calibrating confidence.
-\end{enumerate}
+Traditional automated RCA approaches address these challenges through two broad strategies.
+The first class of approaches employs statistical correlation and causal graph methods: they
+construct dependency graphs between services or metrics and identify components whose
+behavior changes are most causally associated with the observed
+anomaly~\cite{wang2018cloudranger,meng2020localizing,chen2014causeinfer}. While effective in
+controlled environments where component relationships are well-modeled, these methods require
+significant upfront engineering effort to build and maintain the causal model, and they are
+brittle when system topology changes frequently. The second class of approaches applies supervised
+machine learning to structured log representations: log templates are extracted, converted into
+feature vectors or event sequences, and fed into classifiers or sequence models trained to
+recognize fault patterns~\cite{xu2009consolelogs}. These methods can achieve strong performance
+on benchmark datasets, but they depend on labeled training data from the target system, are
+sensitive to log statement drift caused by software updates~\cite{zhang2019logrobust}, and
+produce predictions without interpretable explanations---a significant drawback when the goal is
+to support operator decision-making rather than merely raise an alert.
 
-These issues motivate architectures that incorporate external grounding and explicit verification.
-Retrieval-augmented generation (RAG) is one general strategy: retrieve relevant evidence from a
-corpus and condition the generation on that
-evidence~\cite{lewis2021retrievalaugmentedgenerationknowledgeintensivenlp}. In operational RCA, one
-natural evidence source is the history of prior incidents. A knowledge graph (KG) offers a
-structured representation of such history and enables entity-centric retrieval and recurrence
-reasoning~\cite{hogan2021knowledge,cui2025aetherlog}.
+\section{LLM-Based Attempts at RCA: Capabilities and Limitations}
 
-\section{Motivation}
-Recent advances in LLMs have demonstrated strong capabilities for semantic understanding and
-explanation generation. However, single-LLM RCA remains unreliable due to hallucinations and the
-absence of verification. Inspired by multi-agent debate for improving factuality and reasoning, we
-propose to structure RCA as a debate among specialized agents, grounded by a knowledge graph of
-historical incidents~\cite{du2023improvingfactualityreasoninglanguage}. This formulation is also
-consistent with emerging agent frameworks that emphasize structured multi-agent interaction and task
-decomposition~\cite{wu2023autogen}.
+The emergence of large language models (LLMs) with strong instruction-following and natural
+language generation capabilities~\cite{brown2020languagemodelsfewshotlearners,ouyang2022traininglanguagemodelsfollow}
+has motivated a new generation of RCA approaches that treat the diagnosis task as a prompted
+reasoning problem. The central appeal is clear: an LLM can read heterogeneous log text without
+requiring a domain-specific parser, generate a human-readable explanation of the likely root cause,
+and suggest remediation steps---all in a zero-shot or few-shot setting that requires no task-specific
+training data.
 
-Conceptually, our design combines three ideas:
-\begin{enumerate}
-  \item \textbf{Specialization}: different agents focus on different evidence sources (current log
-        signals, historical KG evidence, and synthesis).
-  \item \textbf{Debate and refinement}: multiple hypotheses are proposed and iteratively refined
-        rather than committing immediately.
-  \item \textbf{Explicit judging}: a dedicated judge agent scores hypotheses using a fixed rubric
-        to enforce evidence-based reasoning and confidence calibration.
-\end{enumerate}
+Several recent systems demonstrate the viability of this direction. RCACopilot, developed at
+Microsoft and evaluated on a year's worth of production cloud incidents, employs an LLM to
+aggregate diagnostic information collected by per-alert handlers and predict the root cause
+category, achieving up to 76.6\% accuracy on real incident
+data~\cite{chen2024rcacopilot}. Ahmed et al.\ conduct the first large-scale study of GPT-3.x
+models for recommending root causes and mitigation steps from incident reports at Microsoft,
+finding that LLMs can surface relevant diagnostic context even without task-specific
+fine-tuning~\cite{ahmed2023rcarecommend}. Roy et al.\ explore the use of LLM-based
+ReAct~\cite{yao2023reactsynergizingreasoningacting} agents equipped with retrieval tools for RCA
+on an out-of-distribution dataset of production incidents, showing that agentic tool use can
+improve diagnostic coverage but also identifying key failure modes when retrieval returns
+irrelevant context~\cite{roy2024llmagentRCA}. AetherLog, which is the most directly related
+prior work to this thesis, integrates an LLM with a knowledge graph of historical incidents for
+log-based RCA, demonstrating that structured retrieval of similar past cases substantially
+reduces unsupported speculation and improves the precision of generated
+diagnoses~\cite{cui2025aetherlog}.
 
-This approach aims to reduce overconfident hallucinations by forcing hypotheses to compete and by
-requiring justification under an explicit scoring schema.
+Despite these promising results, single-LLM and single-agent RCA approaches share a set of
+structural limitations that have not been fully resolved. The most significant is the tendency
+toward hallucination: when the prompt does not contain sufficient or unambiguous evidence, an LLM
+will produce a plausible-sounding but unsupported diagnosis, and there is no internal mechanism
+to detect or correct this~\cite{du2023improvingfactualityreasoninglanguage}. This is particularly
+consequential in RCA because an incorrect diagnosis can lead an engineer to perform unnecessary
+or harmful remediation actions. A related limitation is the absence of hypothesis diversity: a
+single model pass commits to one explanation without systematically considering alternatives. In
+cases where evidence is ambiguous---which is common when failures propagate across multiple
+components---premature commitment to a single hypothesis risks anchoring the operator on the
+wrong causal narrative. Furthermore, single-pass generation provides no calibrated confidence
+signal: the model's expressed confidence correlates poorly with actual correctness, making it
+difficult for operators to decide when to trust the automated diagnosis and when to escalate
+to manual investigation~\cite{chen2024rcacopilot,roy2024llmagentRCA}.
 
-\section{Scope and Assumptions}
-This thesis focuses on log-based RCA in a setting where:
-\begin{enumerate}
-  \item Logs (or extracted log events) are available for an incident window.
-  \item A knowledge graph of historical incidents can be constructed offline and queried at
-        diagnosis time.
-  \item The system should produce both a predicted label in a dataset-specific label space and an
-        explanation suitable for operator triage.
-\end{enumerate}
+\section{Addressing the Gap: Agent Debate with Knowledge Graph Grounding}
 
-We emphasize a reproducible, local setup: our experiments use local 7B-class models (via Ollama)
-and a Neo4j-based knowledge layer. We do not introduce new fine-tuning results in this thesis;
-instead, we highlight parameter-efficient fine-tuning (e.g., QLoRA) as a practical future direction
-for domain adaptation~\cite{dettmers2023qloraefficientfinetuningquantized}.
+This thesis proposes \systemname{}, a multi-agent, knowledge-graph-guided RCA system designed
+to address the limitations of single-agent LLM approaches. The core insight is that the
+reliability problems of single-agent RCA stem from two compounding factors: insufficient
+evidence grounding and the absence of adversarial verification. We address both simultaneously.
+
+Evidence grounding is improved by integrating a Neo4j-based knowledge graph (KG) that stores
+historical incidents, their involved entities, and their diagnosed root causes. At diagnosis time,
+the KG is queried for historical incidents that share entities with the current incident, and the
+retrieved context is provided to the reasoning agents as structured external memory. This design
+is motivated by the success of retrieval-augmented generation for knowledge-intensive
+tasks~\cite{lewis2021retrievalaugmentedgenerationknowledgeintensivenlp} and by the specific
+observation that operational incident history---when organized as a structured
+graph~\cite{hogan2021knowledge}---provides precisely the kind of entity-centric, relation-aware
+context that supports reliable causal inference.
+
+Adversarial verification is implemented through a structured debate protocol in which three
+specialized reasoning agents---a log-focused agent, a KG-focused agent, and a hybrid
+agent---independently generate competing hypotheses. A dedicated judge agent then evaluates all
+hypotheses against a fixed rubric covering evidence quality, reasoning strength, confidence
+calibration, completeness, and consistency. This design is motivated by recent empirical evidence
+that multi-agent debate substantially improves the factual accuracy of LLM-generated
+content~\cite{du2023improvingfactualityreasoninglanguage}, and by the observation that
+specialization and decomposition reduce the chance that all agents share the same blind
+spots~\cite{wu2023autogen}. By forcing hypotheses to compete under an explicit scoring
+mechanism, the system reduces the risk of majority-class collapse and overconfident but
+unsupported diagnoses that are the primary failure modes of single-agent baselines.
 
 \section{Research Questions}
-This thesis investigates the following research questions:
+
+The following research questions structure the experimental investigation in this thesis:
+
 \begin{description}
-  \item[RQ1:] Does a multi-agent approach achieve higher accuracy than single-agent LLM baselines
-              for RCA?
-  \item[RQ2:] Does a structured debate protocol reduce hallucinations and improve reliability?
-  \item[RQ3:] Does knowledge graph integration improve RCA quality?
-  \item[RQ4:] Are generated explanations high-quality and actionable for operators?
+  \item[RQ1:] Does a multi-agent debate approach achieve higher diagnostic accuracy and better
+              class balance than single-agent LLM baselines for log-based RCA?
+  \item[RQ2:] Does structured debate with explicit judge scoring reduce overconfident or
+              unsupported predictions compared to single-pass generation?
+  \item[RQ3:] Does knowledge graph integration, as an external grounding source, measurably
+              improve diagnosis quality beyond what retrieval-augmented single-agent generation
+              achieves?
+  \item[RQ4:] Do the generated explanations provide sufficient evidence citation and causal
+              reasoning to support operator triage?
 \end{description}
 
 \section{Contributions}
-This thesis makes the following contributions:
-\begin{enumerate}
-  \item \textbf{System}: Design and implementation of \systemname{}, a multi-agent RCA system with
-        six specialized agents.
-  \item \textbf{Protocol}: A multi-round debate protocol with a judge that scores evidence and
-        guides refinement.
-  \item \textbf{Knowledge Graph}: A Neo4j-based incident KG enabling retrieval of similar
-        historical incidents.
-  \item \textbf{Evaluation}: Empirical results on Hadoop1 (LogHub), CMCC (LogKG), and HDFS\_v1
-        (LogHub).
-  \item \textbf{Reproducibility}: A fully local implementation using Ollama and Neo4j with
-        documented validation scripts.
-\end{enumerate}
 
-In addition to quantitative results, we provide representative case studies extracted from saved
-system outputs to illustrate how evidence and judge feedback lead to the final diagnosis.
+This thesis makes the following contributions:
+
+\paragraph{Multi-agent RCA architecture.}
+We design and implement \systemname{}, a six-agent RCA system comprising a Log Parser, a KG
+Retrieval Agent, three specialized Reasoners (log-focused, KG-focused, and hybrid), and a Judge
+Agent. Each agent has a well-defined role and operates over structured input/output contracts,
+enabling systematic composition and debugging.
+
+\paragraph{Structured debate protocol.}
+We propose a multi-round debate protocol in which three reasoning agents independently generate
+competing hypotheses, a judge evaluates them against a fixed five-criterion rubric, and agents
+refine their hypotheses based on judge feedback in subsequent rounds. This protocol operationalizes
+reliability as a measurable, evidence-based selection process rather than an informal heuristic.
+
+\paragraph{Knowledge graph for operational memory.}
+We implement a Neo4j-based incident knowledge graph that supports entity-centric retrieval of
+similar historical incidents. The KG is populated incrementally during evaluation, simulating
+an operational deployment where diagnostic history accumulates over time.
+
+\paragraph{Empirical evaluation across three datasets.}
+We evaluate \systemname{} on three publicly available log datasets spanning two domains:
+Hadoop1 and HDFS\_v1 from LogHub~\cite{he2020loghub}, and the CMCC OpenStack failure
+dataset~\cite{cui2025aetherlog}. Across all three datasets, the multi-agent system consistently
+outperforms single-agent and RAG baselines in macro-averaged \fone{} score, with the most
+substantial improvement on CMCC, where single-agent baselines collapse to uninformative
+predictions.
+
+\paragraph{Fully local and reproducible implementation.}
+The entire system runs on local infrastructure using Ollama for LLM inference and Neo4j Community
+Edition for graph storage, with no dependence on commercial API availability. All prompts,
+intermediate outputs, and evaluation scripts are logged, enabling full reproduction of results.
 
 \section{Thesis Organization}
-The remainder of this thesis is organized as follows:
 
-\begin{description}
-  \item[Chapter 2: Background and Related Work] surveys the relevant literature, including log
-        parsing and anomaly detection, knowledge graphs for operational reasoning,
-        retrieval-augmented generation, LLM foundations (transformer architectures, scaling,
-        alignment), and multi-agent systems for reasoning and verification.
-  \item[Chapter 3: System Design and Architecture] presents the layered architecture of
-        \systemname{}, the six specialized agents, the knowledge graph schema, and the multi-round
-        debate protocol.
-  \item[Chapter 4: Methodology] describes the experimental protocol, label normalization
-        procedures, baseline configurations, and evaluation metrics.
-  \item[Chapter 5: Implementation] details the local LLM inference setup, structured output
-        handling, knowledge graph implementation, and validation pipelines.
-  \item[Chapter 6: Experimental Setup and Results] presents the datasets (Hadoop1, CMCC,
-        HDFS\_v1), evaluation schemes, and quantitative results comparing multi-agent, RAG, and
-        single-agent pipelines.
-  \item[Chapter 7: Discussion] interprets the findings, analyzes limitations, and discusses threats
-        to validity.
-  \item[Chapter 8: Conclusion and Future Work] summarizes contributions, answers the research
-        questions, and outlines directions for future research.
-\end{description}
-
-An appendix provides representative case studies extracted from system outputs, illustrating how
-evidence and judge feedback lead to final diagnoses.
+Chapter~2 reviews the background and related work, covering traditional and ML-based RCA,
+knowledge graphs for operational reasoning, LLM foundations from transformers to instruction
+tuning and alignment, and multi-agent reasoning systems. Chapter~3 presents the system design
+and architecture of \systemname{}, detailing the six agents, the knowledge graph schema, and the
+debate protocol. Chapter~4 describes the experimental methodology, including label normalization,
+baseline configurations, and evaluation metrics. Chapter~5 covers the implementation, including
+local LLM inference, structured output handling, and the knowledge graph pipeline.
+Chapter~6 presents the experimental results on all three datasets with detailed per-class
+analysis and a misclassification audit. Chapter~7 discusses the findings, limitations, and threats
+to validity. Chapter~8 concludes with a summary of contributions, answers to the research
+questions, and directions for future work. Appendix~A provides representative case studies
+extracted from system outputs.

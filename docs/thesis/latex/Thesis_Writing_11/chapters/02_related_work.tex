@@ -2,289 +2,304 @@
 
 \chapter{Background and Related Work}
 
-\section{Log Analysis, Anomaly Detection, and Root Cause Analysis}
-Logs are one of the most widely available signals for diagnosing failures in production systems.
-They encode both human-written semantic descriptions (e.g., exception messages) and structured
-runtime context (e.g., component identifiers and timestamps). Research in log analytics typically
-decomposes the problem into: (i)~transforming raw log messages into representations that are easier
-to analyze, (ii)~detecting anomalous behavior, and (iii)~localizing the likely root cause or
-affected component.
+\section{Log Parsing and Template Mining}
 
-\subsection{Log parsing and template mining}
-A common first step is to transform raw logs into templates (also called log events) by masking
-variable tokens such as identifiers, IP addresses, and numeric values. This representation reduces
-vocabulary size, enables aggregation, and supports downstream modeling of event sequences and
-counts.
+Raw log messages are free-form text that combine natural language with runtime variable tokens
+such as IP addresses, block identifiers, and numeric values. Before any pattern-based or
+learning-based analysis can be applied, these messages must be transformed into structured event
+templates by masking the variable portions. This task is known as log parsing, and it serves as a
+prerequisite to virtually all downstream log analytics
+pipelines~\cite{zhu2019tools}.
 
-Drain is a widely adopted online parser that organizes templates in a fixed-depth parse tree to
-support efficient matching and incremental updates~\cite{he2017drain}. Other approaches emphasize
-streaming constraints and online maintenance of the discovered template set; for example, Spell
-performs streaming parsing by maintaining message types as new logs
-arrive~\cite{du2016spell}. Earlier template mining techniques include iterative partitioning
-approaches that cluster messages by progressively splitting on token
-positions~\cite{makanju2009iplom}. Benchmarks and tooling for log parsing have been studied
-systematically, highlighting the importance of both accuracy and efficiency for different
-workloads~\cite{zhu2019tools}.
+Several parsing approaches have been proposed with different tradeoffs between accuracy, throughput,
+and adaptability to new log formats. Drain organizes discovered templates in a fixed-depth parse
+tree, enabling efficient online matching and incremental template
+updates~\cite{he2017drain}. Its fixed-depth design ensures that the parse tree remains compact
+even when the number of templates grows, making it well-suited for continuous log streams. Spell
+takes a streaming approach, using longest common subsequence matching to maintain message types as
+new logs arrive without requiring global re-clustering~\cite{du2016spell}. Earlier work such as
+IPLoM employs iterative partitioning, clustering messages by progressively splitting on token
+positions~\cite{makanju2009iplom}. A systematic benchmark of parsing tools confirms that different
+parsers exhibit substantially different accuracy and efficiency profiles on different log
+corpora~\cite{zhu2019tools}, making parser selection a practically important preprocessing decision.
+In our system, the Log Parser Agent performs a semantic variant of this task using an LLM, which
+allows it to handle heterogeneous log formats without requiring a pre-defined template vocabulary.
 
-\subsection{Learning-based log anomaly detection}
-After parsing, many anomaly detectors treat each execution window as a sequence of templates.
-DeepLog models the likelihood of the next event template using recurrent neural networks and flags
-deviations as anomalous, also offering a form of anomaly diagnosis by identifying the unexpected
-event~\cite{du2017deeplog}. Subsequent work explored robustness to logging changes and noise, which
-are common in real deployments where log statements evolve across versions; LogRobust explicitly
-targets unstable log data and studies transferability and noise
-resilience~\cite{zhang2019logrobust}. Recent deep learning approaches have also incorporated
-transformer-based encoders to capture longer-range context and richer semantics in template
-sequences; LogBERT adapts a BERT-style objective to logs for self-supervised anomaly
-detection~\cite{guo2021logbert}.
+\section{Root Cause Analysis: Traditional Approaches}
 
-While learning-based detectors can achieve strong detection performance in specific datasets, a
-recurring theme is that effectiveness depends heavily on preprocessing, windowing strategy, and
-dataset-specific hyperparameters. A recent empirical study evaluates how far deep learning has
-progressed for log-based anomaly detection and emphasizes the gap between research assumptions and
-operational constraints~\cite{le2022logdlhowfar}.
+It is important to distinguish log-based RCA from the closely related but distinct task of anomaly
+detection. Anomaly detection determines whether a sequence of log events or metrics deviates from
+a learned or rule-defined model of normal behavior; it produces a binary or scored label
+characterizing whether an execution window is anomalous~\cite{du2017deeplog,zhang2019logrobust}.
+RCA, by contrast, is concerned with explaining \emph{why} an incident occurred: which component or
+sub-system is the root cause, how the fault propagated, and what remediation is appropriate.
+RCA takes anomaly detection as a possible input signal---it may reason over sequences of anomalous
+events---but its objective is causal attribution rather than deviation
+scoring~\cite{meng2020localizing,wu2020microrca}. This thesis is concerned exclusively with the
+RCA task; anomaly detection methods are reviewed here only to the extent that they inform the log
+representation strategies used by our parser.
 
-\subsection{From detection to diagnosis}
-Anomaly detection identifies that an execution deviates from normal behavior, but RCA additionally
-requires an explanation: what component is responsible, what evidence supports the conclusion, and
-what remediation is appropriate. Many classical approaches rely on statistical correlation across
-metrics or on dependency graphs. Recent cloud-native RCA systems demonstrate the importance of
-dependency-aware reasoning and localization in microservice
-environments~\cite{wu2020microrca,wang2018cloudranger}. In contrast, log-based diagnosis often
-relies on searching for error signatures, correlating multi-component timelines, and leveraging
-prior incidents. In this thesis, we focus on explanation-oriented RCA from logs by treating the
-diagnosis as a structured reasoning problem grounded in both current incident evidence and
-historical context.
+Traditional automated RCA approaches can be broadly categorized into two families. The first family
+employs causal graph methods: a dependency graph among services or metrics is constructed, and
+statistical or graph-theoretic algorithms identify the component whose anomalous behavior is most
+causally associated with the observed incident. CauseInfer builds a hierarchical causality graph
+from service performance metrics to support automatic fault
+localization~\cite{chen2014causeinfer}. MicroRCA uses a service call graph weighted by anomalous
+performance indicators to localize root causes in microservice
+systems~\cite{wu2020microrca}. CloudRanger applies Bayesian network learning to system metric
+data to identify the most likely causal node in the dependency
+graph~\cite{wang2018cloudranger}. The localization accuracy of these methods depends critically
+on the quality of the dependency model; when the model is incomplete or stale, fault propagation
+paths may not be correctly captured. Moreover, constructing and maintaining accurate causal graphs
+requires ongoing engineering effort and deep system expertise, which limits practical deployment
+in large, rapidly evolving cloud environments.
 
-\section{Datasets and Benchmarks for Log Analytics}
-Public benchmarks have played a key role in enabling reproducible evaluation and comparison.
-LogHub provides a large collection of log datasets from diverse software systems and has become a
-standard source for anomaly detection and diagnosis research~\cite{he2020loghub}. In our
-evaluation, Hadoop1 and HDFS\_v1 are drawn from LogHub. The HDFS-style benchmark traces are
-closely related to early work on mining console logs for large-scale system problem detection, which
-motivated template-level analysis and anomaly detection from system
-logs~\cite{xu2009consolelogs}. For cloud management platforms, OpenStack logs provide a realistic
-setting where failures propagate across interacting services and multiple layers; our CMCC
-evaluation uses an OpenStack failure dataset and label space consistent with LogKG-style settings.
+The second family applies supervised machine learning to log-derived representations. Early work
+by Xu et al.\ demonstrates that principal component analysis over log message count matrices can
+detect and localize problems in large-scale HDFS deployments, establishing logs as a viable signal
+for automated system problem detection~\cite{xu2009consolelogs}. Subsequent work trains sequence
+models over event template sequences to recognize fault signatures: DeepLog uses LSTM networks to
+model normal execution sequences and flags out-of-distribution events as
+anomalous~\cite{du2017deeplog}. While these methods can achieve strong detection rates on
+controlled benchmarks, they require labeled training data from the target system, and their
+performance degrades when log statement formatting changes across software versions---a pervasive
+practical problem demonstrated empirically by LogRobust~\cite{zhang2019logrobust}. Furthermore,
+detection-oriented classifiers produce a fault label or anomaly score but do not generate an
+interpretable causal explanation, which is precisely what incident response workflows
+require~\cite{chen2024rcacopilot}.
+
+\section{Datasets and Benchmarks}
+
+Public benchmarks have been essential for enabling reproducible evaluation and comparison across
+log analysis approaches. LogHub aggregates log data from more than fifteen distinct software
+systems---including Hadoop, HDFS, OpenStack, Apache, and Android---and has become the standard
+reference for both anomaly detection and RCA research~\cite{he2020loghub}. The Hadoop1 and
+HDFS\_v1 datasets used in our evaluation are drawn from LogHub. The HDFS dataset traces back to
+foundational work demonstrating that console log analysis can scale to detecting problems across
+tens of thousands of nodes~\cite{xu2009consolelogs}. For cloud management platforms, the CMCC
+dataset provides industrial OpenStack failure traces in which failures propagate across interacting
+services such as Nova, Neutron, and RabbitMQ; we use this dataset to evaluate cross-domain
+generalization to real enterprise incidents~\cite{cui2025aetherlog}.
 
 \section{Knowledge Graphs for Operational Reasoning}
-Knowledge graphs (KGs) provide a flexible mechanism to represent entities (services, nodes, error
-types), incidents, and relations between them. As a general paradigm, KGs support entity-centric
-retrieval, reasoning over multi-hop relations, and integration of heterogeneous evidence
-sources~\cite{hogan2021knowledge}. In AIOps contexts, KGs can store historical incidents and their
-diagnosed root causes, enabling recurrence reasoning when a new incident shares entities or patterns
-with prior cases.
 
-Recent work such as AetherLog integrates large language models with a knowledge graph for
-log-based RCA, showing that retrieval of similar incidents can improve grounding and reduce
-unsupported speculation~\cite{cui2025aetherlog}. In this thesis, our KG is used as a lightweight
-operational memory: it stores incident summaries, involved entities, and known root causes, and it
-supports retrieval to supply historical context to the reasoning agents.
+Knowledge graphs represent entities, their attributes, and the relations between them in a
+structured, queryable form. As a general technology, they support entity-centric retrieval,
+multi-hop relational reasoning, and the integration of heterogeneous evidence
+sources~\cite{hogan2021knowledge}. These properties are directly useful in AIOps: a KG that
+stores historical incidents, the entities they involved, and their diagnosed root causes provides
+a structured operational memory that can inform diagnosis of new incidents whose entities overlap
+with past cases.
 
-\section{Retrieval-Augmented Generation for Grounded Explanations}
-Retrieval-augmented generation (RAG) combines parametric knowledge encoded in a language model with
-non-parametric retrieval from an external corpus. For knowledge-intensive tasks, RAG-style methods
-improve factuality by allowing the model to condition on retrieved evidence instead of relying only
-on memorized content~\cite{lewis2021retrievalaugmentedgenerationknowledgeintensivenlp}. In RCA
-settings, retrieved evidence can correspond to incident reports, historical logs, or structured KG
-summaries. We treat RAG as a baseline in our experiments: a single LLM call augmented with
-retrieved historical incidents.
+AetherLog is the most directly related prior work that combines KG retrieval with LLM-based
+reasoning for log-based RCA~\cite{cui2025aetherlog}. By querying a KG of historical incidents and
+injecting the retrieved context into the LLM prompt, AetherLog demonstrates that structured
+historical grounding substantially reduces unsupported speculation and improves precision compared
+to a purely parametric LLM baseline. Our work extends this direction by embedding KG retrieval
+within a multi-agent debate framework, so that the retrieved context is evaluated critically
+rather than accepted uncritically by a single reasoning pass.
+
+\section{Retrieval-Augmented Generation}
+
+Retrieval-augmented generation (RAG) augments a language model's parametric knowledge with
+evidence retrieved from an external corpus at inference
+time~\cite{lewis2021retrievalaugmentedgenerationknowledgeintensivenlp}. For knowledge-intensive
+tasks where the relevant information may not have been adequately captured during pretraining, RAG
+substantially improves factual accuracy by conditioning generation on retrieved documents. In the
+RCA setting, retrieved evidence takes the form of incident reports, historical log summaries, or
+structured KG subgraphs. The RAG paradigm motivates our KG Retrieval Agent, which supplies the
+reasoning agents with entity-matched historical context. However, a limitation of standard RAG
+pipelines is that retrieval quality is not verified: when retrieved context is irrelevant or
+misleading, a single-agent model can still produce a confident but incorrect diagnosis. Roy et
+al.\ explicitly identify this as a failure mode of LLM-based RCA agents, finding that
+out-of-distribution retrieval can actively harm diagnostic
+accuracy~\cite{roy2024llmagentRCA}. Our debate protocol addresses this by requiring the judge to
+score evidence quality, penalizing hypotheses that cite weak or irrelevant retrieved facts.
+
+\section{LLM-Based RCA: Current State of the Art}
+
+The application of large language models to automated RCA has emerged as an active research
+direction over the past two years, motivated by the observation that LLMs can interpret
+heterogeneous log text and generate natural-language explanations without requiring
+dataset-specific training or hand-crafted
+rules~\cite{brown2020languagemodelsfewshotlearners,ouyang2022traininglanguagemodelsfollow}.
+
+RCACopilot, deployed at Microsoft on Azure cloud incidents, represents the most prominent
+production-scale LLM-based RCA system to date~\cite{chen2024rcacopilot}. It employs per-alert
+incident handlers that collect diagnostic data from logs, traces, and metrics, and feeds this
+aggregated context to an LLM for root cause category prediction. Evaluated on a year's worth of
+production incidents, RCACopilot achieves up to 76.6\% RCA accuracy and demonstrates that LLMs
+can match or exceed the accuracy of rule-based on-call systems when given sufficiently curated
+diagnostic inputs. A key design choice is the separation of data aggregation (handled by
+specialized handlers per alert type) from reasoning (handled by the LLM), which reduces the
+context burden on the model. However, RCACopilot operates as a single-agent system with no
+cross-validation of its prediction, and its reliance on specialized per-alert handlers limits
+generalizability to new alert types without additional engineering.
+
+Ahmed et al.\ conduct an early large-scale empirical study of GPT-3.x models for recommending
+root causes and mitigation steps from Microsoft incident reports, finding that LLM outputs are
+useful even without fine-tuning but that their quality degrades substantially for incidents whose
+diagnostic signals do not appear in the model's training
+distribution~\cite{ahmed2023rcarecommend}. This finding motivates the use of retrieval-based
+grounding to supply in-context evidence that the model cannot rely on memorized knowledge to
+provide.
+
+Roy et al.\ study LLM-based ReAct agents equipped with retrieval tools for RCA on an
+out-of-distribution dataset of production incidents~\cite{roy2024llmagentRCA}. Their evaluation
+reveals a fundamental tension: agentic tool use can improve diagnostic coverage by retrieving
+relevant evidence, but it also introduces new failure modes when the retrieval system returns
+irrelevant results that the agent uncritically incorporates into its reasoning. This finding
+directly informs our design: rather than relying on a single agent to both retrieve and reason,
+we separate the retrieval function into a dedicated KG Retrieval Agent and subject the reasoning
+outputs to competitive evaluation by the judge.
+
+AetherLog specifically targets log-based RCA and integrates KG retrieval within the
+LLM-based diagnostic pipeline~\cite{cui2025aetherlog}. Unlike the cloud incident systems of
+RCACopilot and Ahmed et al., which consume pre-processed diagnostic bundles, AetherLog operates
+on raw log sequences, making it the most architecturally comparable prior work to ours. Our
+system extends AetherLog's core insight---that structured historical grounding improves LLM-based
+log diagnosis---by adding the multi-agent debate and judging layers that AetherLog lacks.
 
 \section{Foundations of Large Language Models}
-The rapid progress of LLM-based reasoning is enabled by two intertwined developments: (i)~the
-transformer architecture as a general sequence model, and (ii)~large-scale self-supervised
-pretraining followed by task- and instruction-oriented adaptation.
 
-\subsection{Transformer architectures and representation learning}
-Transformers replace recurrence with self-attention, enabling efficient modeling of long-range
-dependencies and flexible conditioning on
-context~\cite{vaswani2023attentionneed}. This is particularly relevant for logs: many failure
-signatures are expressed as sparse error messages whose interpretation depends on context
-(surrounding events, component names, and temporal order). From a modeling perspective,
-self-attention provides a mechanism to relate distant log lines without hand-crafted feature
-engineering.
+Understanding why LLMs are effective for log-based reasoning requires reviewing the architectural
+and training advances that underpin them.
 
-Two major pretraining families are commonly distinguished:
-\begin{enumerate}
-  \item \textbf{Bidirectional encoder models}, such as BERT, learn contextual token representations
-        via masked language modeling and are effective as general-purpose
-        encoders~\cite{devlin2019bertpretrainingdeepbidirectional}. RoBERTa studies optimization
-        and data scaling choices for robust BERT-style
-        pretraining~\cite{liu2019robertarobustlyoptimizedbert}.
-  \item \textbf{Autoregressive decoder models}, such as GPT-style LMs, generate text left-to-right
-        and naturally support open-ended explanation generation. GPT-3 demonstrates that
-        sufficiently large autoregressive models can perform strong few-shot learning via
-        prompting~\cite{brown2020languagemodelsfewshotlearners}.
-\end{enumerate}
+\subsection{Transformer architectures}
 
-For RCA, decoder-style models are especially convenient because they can generate structured
-hypotheses, evidence lists, and remediation steps in one pass, while encoder-style representations
-can be useful for retrieval, clustering, and similarity search over log templates.
+The transformer architecture replaces recurrence with token-level self-attention, enabling parallel
+computation over sequences and flexible modeling of long-range
+dependencies~\cite{vaswani2023attentionneed}. This architectural property is directly relevant
+to log analysis: failure signatures are often sparse, with the critical error token appearing many
+lines after the triggering event, and self-attention provides a mechanism to associate these
+distant tokens without the vanishing-gradient problems of recurrent models. BERT demonstrates that
+deep bidirectional transformers pretrained on large corpora learn powerful contextual
+representations applicable to a wide range of downstream
+tasks~\cite{devlin2019bertpretrainingdeepbidirectional}, while RoBERTa establishes best practices
+for pretraining data and hyperparameter choices that substantially improve representation
+quality~\cite{liu2019robertarobustlyoptimizedbert}. Autoregressive decoder models such as
+GPT-3 demonstrate that sufficiently large transformers can perform complex reasoning and
+multi-step generation in a few-shot prompting setting, without any task-specific gradient
+updates~\cite{brown2020languagemodelsfewshotlearners}. For RCA, this means that a capable
+decoder LLM can generate structured hypotheses, evidence lists, and remediation narratives in
+a single forward pass, conditioned solely on the prompt content.
 
-\subsection{Scaling laws and compute-optimal training}
-Empirical scaling laws show that language model performance improves predictably with increased
-model size, data, and compute~\cite{kaplan2020scalinglawsneurallanguage}. Subsequent work argues
-that, under fixed compute budgets, training compute-optimal models requires balancing model size and
-dataset size (often referred to as the Chinchilla
-perspective)~\cite{hoffmann2022trainingcomputeoptimallargelanguage}. Large-scale training studies
-such as Gopher and PaLM further characterize practical training recipes, evaluation behavior, and
-emergent capabilities~\cite{rae2022scalinglanguagemodelsmethods,chowdhery2022palmscalinglanguagemodeling}.
+\subsection{Scaling laws and emergent capabilities}
 
-These results matter for applied RCA in two ways. First, they help explain why modern
-instruction-following LLMs exhibit stronger semantic generalization over heterogeneous operational
-text. Second, they motivate the use of relatively small but capable open models (e.g., 7B-class) in
-local deployments, which can still benefit from the broader ecosystem of scaling research.
+Empirical scaling laws establish that language model performance improves predictably as a
+power-law function of model size, dataset size, and training
+compute~\cite{kaplan2020scalinglawsneurallanguage}. Chinchilla scaling analysis further refines
+this understanding, arguing that most existing LLMs were under-trained relative to their size and
+that compute-optimal training requires substantially more data per parameter than earlier
+recipes~\cite{hoffmann2022trainingcomputeoptimallargelanguage}. Large-scale training experiments
+such as Gopher and PaLM characterize how emergent capabilities---including multi-step reasoning,
+code generation, and in-context learning---appear at scale and improve non-monotonically with
+model size~\cite{rae2022scalinglanguagemodelsmethods,chowdhery2022palmscalinglanguagemodeling}.
+These findings have practical implications for our work: they explain why modern 7B-class open
+models, which benefit from compute-efficient training recipes derived from scaling research, can
+exhibit strong semantic generalization over heterogeneous operational text even in a zero-shot
+setting.
 
-\subsection{Open foundation models and local deployment}
-Open foundation models such as LLaMA demonstrate that strong general-purpose language modeling can
-be achieved with efficient training and careful data
-curation~\cite{touvron2023llamaopenefficientfoundation}. For practical AIOps workflows, open models
-are attractive because they can be deployed locally for privacy and reproducibility, and they allow
-systematic evaluation under controlled versions.
+\subsection{Instruction tuning and alignment}
 
-\subsection{Instruction tuning, alignment, and preference optimization}
-To be useful in real systems, LLMs must not only generate fluent text but also follow instructions
-and produce outputs in operator-friendly formats. Instruction tuning and alignment methods aim to
-improve this behavior.
+Raw pretrained LLMs generate fluent text but do not reliably follow task instructions, adhere to
+output format constraints, or avoid overconfident assertions. Instruction tuning and alignment
+methods are designed to instill these behaviors. InstructGPT demonstrates that training with
+reinforcement learning from human feedback (RLHF)---using PPO to optimize against a learned
+reward model of human preferences---substantially improves instruction-following quality compared
+to supervised fine-tuning
+alone~\cite{ouyang2022traininglanguagemodelsfollow,schulman2017proximalpolicyoptimizationalgorithms}.
+Complementary instruction-tuning approaches demonstrate that scale is not the only route to
+zero-shot task generalization: finetuned language models evaluated on held-out task types show
+strong zero-shot performance when instruction coverage in fine-tuning is
+broad~\cite{wei2022finetunedlanguagemodelszeroshot}. Self-Instruct shows that self-generated
+instructions can bootstrap alignment data at low cost~\cite{wang2023selfinstructaligninglanguagemodels},
+while LIMA demonstrates that a small, carefully curated set of alignment examples can be
+surprisingly effective~\cite{zhou2023limaalignment}. Direct preference optimization (DPO) offers
+a simplified alternative to RLHF that avoids explicit reward model training by directly optimizing
+the language model on preference
+data~\cite{rafailov2024directpreferenceoptimizationlanguage}.
 
-InstructGPT demonstrates training language models to follow instructions with human feedback,
-typically using reinforcement learning from human feedback
-(RLHF)~\cite{ouyang2022traininglanguagemodelsfollow}. RLHF pipelines often rely on
-policy-optimization algorithms such as
-PPO~\cite{schulman2017proximalpolicyoptimizationalgorithms}. Complementary directions include
-large-scale instruction tuning (e.g., finetuned language models as zero-shot
-learners)~\cite{wei2022finetunedlanguagemodelszeroshot}, self-generated instruction
-bootstrapping~\cite{wang2023selfinstructaligninglanguagemodels}, and small curated datasets for
-alignment (LIMA)~\cite{zhou2023limaalignment}. More recently, direct preference optimization (DPO)
-proposes an alternative to explicit reward modeling in alignment, framing preference learning in a
-simpler objective~\cite{rafailov2024directpreferenceoptimizationlanguage}.
+In the context of RCA, alignment is practically important in three respects. First, the system
+must produce outputs in a strict JSON schema; misformatted outputs cannot be parsed and disrupt
+the pipeline at scale. Second, the judge agent must produce calibrated scores rather than simply
+asserting that one hypothesis is ``better.'' Third, reasoning agents must acknowledge uncertainty
+rather than generating overconfident diagnoses when evidence is weak. Modern instruction-tuned
+LLMs provide a strong foundation for these requirements, though reliability for operational tasks
+still requires the additional architectural guardrails that our debate protocol provides.
 
-In the RCA setting, alignment is practically important because we require the model to:
-\begin{itemize}
-  \item follow strict output schemas (e.g., JSON arrays of hypotheses),
-  \item calibrate confidence appropriately,
-  \item avoid hallucinating unsupported operational actions.
-\end{itemize}
-Our work does not train new aligned models, but these foundations motivate why modern
-instruction-following LLMs can serve as reasoning components in a controlled pipeline.
+\subsection{Parameter-efficient adaptation}
 
-\subsection{Parameter-efficient adaptation and lightweight finetuning}
-Even strong foundation models can benefit from domain adaptation when log formats and operational
-terminology differ from pretraining distributions. Parameter-efficient fine-tuning (PEFT) provides
-a practical approach: LoRA inserts low-rank adapters into transformer layers to adapt behavior with
-modest compute~\cite{hu2021loralowrankadaptationlarge}. QLoRA further reduces resource requirements
-by finetuning quantized models while retaining
-quality~\cite{dettmers2023qloraefficientfinetuningquantized}. These methods are directly relevant
-to future AIOps deployments where privacy constraints motivate local finetuning on
+Even well-aligned foundation models may not have been exposed to the specific log terminology,
+error patterns, and operational conventions of a target system during pretraining. Parameter-efficient
+fine-tuning (PEFT) provides a practical mechanism for domain
+adaptation~\cite{raffel2023exploringlimitstransferlearning}: LoRA inserts low-rank decomposition
+matrices into transformer layers, adapting model behavior with a fraction of the parameters and
+compute required for full fine-tuning~\cite{hu2021loralowrankadaptationlarge}. QLoRA further
+reduces the resource footprint by combining quantization of the base model with LoRA adapters,
+enabling fine-tuning of 7B-class models on commodity
+hardware~\cite{dettmers2023qloraefficientfinetuningquantized}. While we do not perform
+domain-specific fine-tuning in this thesis, these methods represent the most practical path for
+future operational deployments where privacy constraints require on-premise adaptation on
 organization-specific incident corpora.
 
-\section{LLM Reasoning, Verification, and Multi-Agent Systems}
-LLMs provide a unified interface for reasoning over semi-structured text such as logs, where the
-model can generate hypotheses and natural-language explanations. However, a central limitation is
-reliability: models can generate plausible but incorrect diagnoses when evidence is incomplete or
-when the prompt induces spurious correlations.
+\section{LLM Reasoning Strategies and Multi-Agent Verification}
 
-From a foundations perspective, this reliability problem can be understood as a consequence of
-optimizing for next-token prediction rather than for correctness under an explicit operational
-objective. Even instruction-tuned models can be overconfident or may follow spurious patterns if
-evidence is weak. Therefore, applied RCA requires architectural guardrails that connect model
-outputs to evidence and provide mechanisms for verification.
+Even a well-aligned, capable LLM can produce incorrect diagnoses when evidence is ambiguous or
+incomplete. A growing body of work addresses this reliability problem through structured reasoning
+strategies and multi-agent architectures.
 
-\subsection{Reasoning strategies}
-Prompting strategies such as chain-of-thought aim to elicit intermediate reasoning steps and have
-been shown to improve performance on complex reasoning
-tasks~\cite{wei2023chainofthoughtpromptingelicitsreasoning}. Sampling multiple reasoning traces
-and choosing the most consistent answer (self-consistency) can further improve robustness by
-reducing sensitivity to a single sampled
-trajectory~\cite{wang2023selfconsistencyimproveschainthought}. In interactive settings, ReAct
-interleaves reasoning with actions, enabling a model to decide what information to retrieve or what
-steps to take next~\cite{yao2023reactsynergizingreasoningacting}.
+Chain-of-thought prompting demonstrates that instructing a model to generate intermediate reasoning
+steps before producing a final answer substantially improves performance on multi-step reasoning
+tasks~\cite{wei2023chainofthoughtpromptingelicitsreasoning}. The key mechanism is that explicit
+intermediate steps anchor the model's attention on the relevant sub-problems and reduce the chance
+of shortcut reasoning that bypasses the evidentiary chain. Self-consistency extends this idea by
+sampling multiple reasoning traces from the same model and selecting the most frequent final answer,
+thereby reducing sensitivity to any single sampled
+trajectory~\cite{wang2023selfconsistencyimproveschainthought}. Large LLMs are also zero-shot
+reasoners~\cite{kojima2023largelanguagemodelszeroshot}, meaning that step-by-step reasoning can
+be elicited simply by appending ``Let's think step by step'' to a prompt. ReAct interleaves
+reasoning with tool invocation, enabling models to alternate between deliberation and action in
+interactive environments~\cite{yao2023reactsynergizingreasoningacting}; Roy et al.\ apply this
+approach to RCA specifically~\cite{roy2024llmagentRCA}.
 
-In RCA, these strategies suggest two design principles: (i)~do not commit to a single hypothesis
-too early, and (ii)~treat retrieval and structured analysis as explicit actions rather than implicit
-assumptions.
-
-\subsection{Multi-agent debate and structured evaluation}
-Multi-agent debate proposes that having multiple agents propose and critique answers can improve
-factuality and reduce hallucinations. The multiagent debate framework explicitly studies how debate
-among agents can lead to more accurate and better-justified
-answers~\cite{du2023improvingfactualityreasoninglanguage}. In a similar spirit, modern agent
-frameworks such as AutoGen formalize multi-agent conversations and tool use for complex
-tasks~\cite{wu2023autogen}.
-
-In this thesis, we adapt these ideas to RCA by constructing specialized agents that reason from
-different evidence sources (current logs, KG history, and their synthesis) and by introducing an
-explicit judge agent. Rather than relying on informal critique, the judge assigns structured scores
-based on evidence quality, reasoning strength, confidence calibration, completeness, and
-consistency, selecting a final diagnosis and producing feedback for refinement rounds.
-
-\section{Efficient and Local Model Deployment}
-Operational RCA systems often need to run under constraints such as privacy, cost, and offline
-environments. For reproducibility, we run 7B-class models locally via Ollama. While we do not
-fine-tune models in this thesis, parameter-efficient fine-tuning methods such as QLoRA provide a
-practical path for future domain adaptation with limited
-compute~\cite{dettmers2023qloraefficientfinetuningquantized}.
-
-Local deployment also interacts with model choice. Open foundation models such as LLaMA provide a
-strong baseline family for on-premise
-usage~\cite{touvron2023llamaopenefficientfoundation}, while the broader scaling literature motivates
-careful tradeoffs between model size, data, and compute for practical
-deployments~\cite{kaplan2020scalinglawsneurallanguage,hoffmann2022trainingcomputeoptimallargelanguage}.
-In our system, we prefer a controlled, reproducible setup over maximum model size, and we compensate
-by using retrieval and multi-agent verification.
-
-\section{Connecting LLM Foundations to AIOps RCA}
-The above foundations connect naturally to AIOps and RCA in four ways:
-\begin{enumerate}
-  \item \textbf{Unstructured-to-structured transformation}: transformers can interpret raw log text
-        and produce structured representations (events, entities, hypotheses), reducing reliance on
-        hand-engineered features.
-  \item \textbf{Grounding and memory}: RAG and knowledge graphs provide non-parametric memory and
-        recurrence signals, reducing hallucinations and improving
-        explainability~\cite{lewis2021retrievalaugmentedgenerationknowledgeintensivenlp,hogan2021knowledge,cui2025aetherlog}.
-  \item \textbf{Verification and deliberation}: multi-agent debate and judging implement a practical
-        verification layer on top of an otherwise single-pass
-        generator~\cite{du2023improvingfactualityreasoninglanguage,wu2023autogen}.
-  \item \textbf{Adaptation to local domains}: PEFT methods such as LoRA/QLoRA enable future domain
-        adaptation under privacy and compute
-        constraints~\cite{hu2021loralowrankadaptationlarge,dettmers2023qloraefficientfinetuningquantized}.
-\end{enumerate}
-In this thesis, \systemname{} operationalizes these connections by combining (i)~structured log
-parsing, (ii)~KG-based retrieval, (iii)~multiple specialized reasoners, and (iv)~an explicit judge
-that scores evidence and reasoning.
+Multi-agent debate takes a different approach to reliability: rather than improving the reasoning
+of a single model, it introduces multiple agents that independently generate answers and then
+critique each other's responses. Du et al.\ provide the first systematic empirical study of
+multi-agent debate, demonstrating that having multiple LLM instances propose and refine answers
+through iterative debate reduces factual errors and improves reasoning
+quality~\cite{du2023improvingfactualityreasoninglanguage}. AutoGen formalizes multi-agent
+conversation and tool use within a general framework that supports heterogeneous agent roles,
+custom conversation topologies, and human-in-the-loop
+interaction~\cite{wu2023autogen}. These frameworks establish the architectural vocabulary that
+we draw on in designing our debate protocol, adapted to the specific requirements of log-based
+RCA: hypothesis generation must be grounded in log evidence and historical KG context, the judge
+must score against an operational rubric, and the protocol must terminate within a bounded number
+of rounds to remain practical.
 
 \section{Summary and Research Gap}
-The literature reviewed above establishes several key points:
-\begin{enumerate}
-  \item \textbf{Log analysis is well-studied but challenging}: parsing, anomaly detection, and
-        diagnosis have been addressed by rule-based, statistical, and deep learning methods, but
-        effectiveness depends heavily on dataset-specific tuning and preprocessing choices.
-  \item \textbf{LLMs offer a new interface for log understanding}: transformer-based models can
-        interpret heterogeneous log text and generate natural-language explanations, but
-        single-LLM approaches suffer from hallucinations and lack verification.
-  \item \textbf{Knowledge graphs support grounding and recurrence reasoning}: KGs provide
-        structured storage for historical incidents and enable retrieval of similar cases, but
-        retrieval alone does not guarantee reliable diagnosis.
-  \item \textbf{Multi-agent debate improves factuality}: recent work shows that having multiple
-        agents propose and critique answers can reduce errors and improve justification quality.
-  \item \textbf{Alignment and instruction tuning improve usability}: modern LLMs benefit from
-        instruction tuning and RLHF, but reliability for operational tasks requires additional
-        architectural guardrails.
-\end{enumerate}
 
-Despite this progress, a gap remains: \textbf{no existing system combines multi-agent debate with
-knowledge graph grounding for log-based RCA}. Prior work on multi-agent debate focuses on general
-reasoning tasks, while prior work on KG-based RCA uses single-agent architectures. This thesis
-addresses this gap by designing and evaluating a system that integrates both mechanisms.
+The literature reviewed in this chapter reveals a clear progression from template-based log
+parsers through statistical RCA methods to LLM-based diagnostic systems, and from single-agent
+LLM approaches to agent frameworks with tool use and retrieval augmentation. At the same time,
+it reveals a gap that this thesis addresses.
 
-Specifically, our contributions address the following limitations of prior work:
-\begin{itemize}
-  \item \textbf{Single-agent LLM RCA}: prone to majority-class collapse and overconfident
-        predictions. We address this with multi-agent hypothesis generation and explicit judging.
-  \item \textbf{RAG without verification}: retrieval improves grounding but does not prevent the
-        model from ignoring or misinterpreting retrieved evidence. We address this with a judge
-        that scores evidence quality.
-  \item \textbf{Dataset-specific ML/DL methods}: require training and hyperparameter tuning for
-        each dataset. We address this with a zero-shot LLM approach that generalizes across
-        domains.
-\end{itemize}
+Traditional causal-graph and supervised ML approaches to RCA require either a well-maintained
+dependency model or labeled training data from the target system, neither of which is reliably
+available in cross-domain or rapidly evolving cloud
+environments~\cite{zhang2024cloudRCAsurvey,zhang2019logrobust}. LLM-based RCA systems such as
+RCACopilot and AetherLog demonstrate that LLMs can diagnose incidents without task-specific
+training, but they share the structural limitation of single-agent, single-pass generation: there
+is no mechanism to verify whether the produced hypothesis is supported by the available evidence
+or to systematically explore alternative explanations before committing to a
+diagnosis~\cite{chen2024rcacopilot,roy2024llmagentRCA}. Knowledge graph grounding improves
+factuality by supplying external evidence, but retrieval alone does not prevent the model from
+ignoring or misinterpreting the retrieved context~\cite{cui2025aetherlog}.
+
+Multi-agent debate has been shown to improve factual accuracy and reasoning quality in general
+LLM settings~\cite{du2023improvingfactualityreasoninglanguage}, but this approach has not
+previously been combined with knowledge graph grounding and applied to log-based RCA. This thesis
+fills that gap by proposing a system in which multi-agent hypothesis generation, KG-based
+evidence retrieval, and explicit judge-based evaluation are integrated into a single coherent
+pipeline, and by evaluating this design empirically on three publicly available incident
+datasets.

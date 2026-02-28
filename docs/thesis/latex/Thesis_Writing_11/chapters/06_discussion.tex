@@ -3,80 +3,97 @@
 \chapter{Discussion}
 
 \section{Key Findings}
-This section summarizes the key findings from the experimental evaluation and discusses their
-implications.
 
-\subsection{Debate Improves Balance}
-On Hadoop1, the single-agent baseline collapses to the majority class under the strict scheme,
-which inflates accuracy but harms macro-\fone{}. The multi-agent system improves macro-\fone{} by
-producing more diverse predictions and by rewarding evidence-backed hypotheses via judge scoring.
+\subsection{Debate Reduces Majority-Class Collapse}
 
-This behavior highlights an important distinction between \textbf{prediction accuracy} and
-\textbf{diagnostic utility}. In operational RCA, over-predicting a frequent class can be
-deceptively high-accuracy but provides limited value because it fails precisely in the tail cases
-where operators most need automation. The debate setting encourages the system to enumerate
-alternatives and to justify them with evidence, which reduces the chance of ``defaulting'' to a
-single class.
+On Hadoop1, the single-agent baseline collapses to the majority class (\texttt{machine\_down})
+under the strict four-class scheme, achieving 50.9\% accuracy that is entirely attributable to
+predicting the dominant class while failing on all minority classes. This pattern is a well-known
+failure mode of single-pass generation: without a mechanism to enumerate and compare alternatives,
+a language model will commit to whichever explanation the most prominent evidence pattern suggests,
+which in imbalanced datasets is typically the frequent-class
+signature~\cite{du2023improvingfactualityreasoninglanguage}. Macro-\fone{} reveals the severity of
+this collapse---the single-agent achieves only 17.3\% macro-\fone{} on the strict scheme, compared
+to 21.6\% for the multi-agent system, which correctly identifies \texttt{disk\_full} incidents
+(36.4\% per-class \fone{}) while the single-agent achieves 0\%.
 
-In addition, the judge mechanism enforces a lightweight form of verification: hypotheses compete
-under a fixed rubric, and the system is encouraged to surface missing evidence or inconsistencies.
-This addresses a known limitation of single-pass generation, where language models may produce
-plausible explanations without checking counterfactuals.
+This distinction between prediction accuracy and diagnostic utility is practically significant.
+Macro-averaged metrics are the appropriate evaluation criterion when rare failure classes are
+operationally critical, because they assign equal weight to each class regardless of its
+frequency~\cite{le2022logdlhowfar}. The judge mechanism addresses this by requiring each
+hypothesis to be scored on evidence quality; a hypothesis that generically attributes failures to
+the most common cause will score lower than one that cites specific disk-related error signatures,
+forcing the system toward minority-class predictions when the evidence supports them.
 
-\subsection{Cross-Domain Generalization}
-CMCC provides industrial OpenStack logs used in LogKG, reducing concerns about leakage during
-model training and strengthening the generalizability claim. Multi-agent debate substantially
-reduces the ``unknown'' failure mode by enforcing structured evaluation and refinement.
+\subsection{Cross-Domain Generalization via Structured Verification}
 
-From an LLM perspective, this result is consistent with the hypothesis that strong language models
-can generalize semantically across domains when prompts provide sufficient context, but reliability
-remains a challenge when the model must map free-text reasoning into a closed label space. The
-multi-agent design helps by:
-\begin{enumerate}
-  \item separating hypothesis generation from selection,
-  \item increasing diversity of candidate diagnoses,
-  \item penalizing unsupported guesses during judging.
-\end{enumerate}
+The CMCC results provide the clearest evidence that single-agent generation is insufficient for
+cross-domain RCA. Both the single-agent baseline (4.3\% accuracy) and the RAG baseline (8.6\%
+accuracy) collapse predominantly to the \texttt{unknown} label---60.2\% and 70.0\% unknown rates
+respectively---while the multi-agent system achieves 61.3\% accuracy with only 17.2\% unknown
+predictions. The collapse of RAG-based single-agent generation is particularly informative: despite
+having retrieved historical context, the single-agent still fails to map its reasoning into the
+correct label space. This is consistent with the finding of Roy et al.\ that out-of-distribution
+retrieval can mislead rather than ground a single-agent model, because there is no verification
+mechanism to assess whether the retrieved evidence is relevant~\cite{roy2024llmagentRCA}.
 
-This is particularly relevant for cross-domain settings, where memorized correlations from
-pretraining may not match the target system and the model must rely on the evidence presented.
+The multi-agent design addresses this failure mode through structural separation: hypothesis
+generation and hypothesis evaluation are handled by different agents operating under different
+objectives. The reasoners are tasked with generating diverse candidate explanations, while the
+judge is tasked with assessing which candidates are best supported by the available evidence. This
+separation is critical in cross-domain settings where the model cannot rely on memorized
+correlations from pretraining and must reason explicitly from the evidence provided in the
+prompt~\cite{ahmed2023rcarecommend}.
 
-\subsection{Same-Domain Scale Validation}
-HDFS\_v1 demonstrates performance on a large-scale dataset. Even though HDFS\_v1 is binary anomaly
-detection rather than multi-class RCA, the system maintains balanced recall and produces
-operationally meaningful hypotheses.
+\subsection{HDFS-v1: Balanced Recall in Large-Scale Binary Diagnosis}
 
-In practice, HDFS\_v1 tests whether the system can remain stable under realistic log volume and
-noisy execution traces, where anomalies are rare. Although our evaluation uses a balanced sample
-for reporting, the underlying dataset is highly imbalanced, which makes macro metrics important.
+HDFS\_v1 tests the system on a large-scale log dataset where the full data distribution is highly
+imbalanced (97.1\% normal, 2.9\% anomaly). We evaluate on a balanced 200-sample draw to ensure
+meaningful macro metrics across both classes. The single-agent baseline reveals the expected
+asymmetry under imbalance: it achieves 97\% recall on normal blocks but only 33\% recall on
+anomaly blocks, indicating that it defaults conservatively to the normal prediction when uncertain.
+The multi-agent system substantially corrects this asymmetry, achieving 74\% recall on normal and
+65\% recall on anomaly, resulting in a balanced macro-\fone{} of 69.4\% versus the single-agent's
+61.3\%. This improvement is consistent with the general principle that diverse hypothesis
+generation and adversarial verification reduce the pull toward the dominant prediction class,
+a mechanism analogous to the ensemble diversity effect documented in the multi-agent debate
+literature~\cite{du2023improvingfactualityreasoninglanguage}.
 
-\subsection{Grounding via Retrieval and Historical Memory}
-Using historical information as context is a direct way to improve factuality.
-Retrieval-augmented generation (RAG) improves grounding in many knowledge-intensive
-tasks~\cite{lewis2021retrievalaugmentedgenerationknowledgeintensivenlp}. In our setting, the
-knowledge graph provides a structured retrieval interface: similar incidents, entity context, and
-common resolution patterns can be supplied to the reasoners and used as explicit evidence.
+\subsection{Knowledge Graph Grounding Improves Factuality, but Requires Verification}
 
-However, retrieval alone is not sufficient. When the retrieved context is weak or irrelevant, a
-single-agent RAG baseline may still collapse to ``unknown'' predictions or to generic hypotheses.
-The multi-agent system makes retrieval more useful by forcing hypotheses to be compared, and by
-requiring evidence quality to be assessed explicitly.
+The comparison between the RAG baseline and the single-agent baseline isolates the contribution of
+KG retrieval. On Hadoop1 coarse, retrieval improves macro-\fone{} from 25.8\% to 37.9\%
+(+12.1\,pp), confirming that historical incident context provides useful grounding that parametric
+model knowledge alone cannot supply. This finding is consistent with prior work showing that RAG
+substantially improves factual accuracy for knowledge-intensive tasks by conditioning generation on
+retrieved documents~\cite{lewis2021retrievalaugmentedgenerationknowledgeintensivenlp}. However,
+on CMCC, where the CMCC label space is more domain-specific, the RAG baseline with 8.6\% accuracy
+still dramatically underperforms the multi-agent system at 61.3\%. The retrieved context did not
+prevent the single-agent from producing uninformative outputs, because a single-pass model lacks
+the verification mechanism to distinguish reliable retrieved evidence from irrelevant
+matches~\cite{roy2024llmagentRCA,cui2025aetherlog}. The multi-agent system's judge addresses this
+by explicitly scoring the evidence quality criterion, penalizing hypotheses that rely on weakly
+supported retrieval.
 
-\subsection{Why Multi-Agent Helps Reliability}
-We interpret the multi-agent improvement as a combination of:
-\begin{enumerate}
-  \item \textbf{Ensembling of perspectives}: different reasoners focus on different cues (temporal
-        log patterns vs historical recurrence), which reduces single-perspective blind spots.
-  \item \textbf{Structured deliberation}: multi-round refinement encourages the system to
-        incorporate critique and fill missing evidence.
-  \item \textbf{Explicit evaluation}: judge scoring operationalizes reliability into a rubric
-        (evidence quality, reasoning strength, calibration, completeness, consistency).
-\end{enumerate}
+\subsection{Why Multi-Agent Debate Improves Reliability: A Mechanistic Interpretation}
 
-These mechanisms are conceptually related to recent work in multi-agent
-debate~\cite{du2023improvingfactualityreasoninglanguage} and agentic
-decomposition~\cite{wu2023autogen}, as well as general reasoning strategies such as
-chain-of-thought and self-consistency~\cite{wei2023chainofthoughtpromptingelicitsreasoning,wang2023selfconsistencyimproveschainthought}.
+The consistent improvement of the multi-agent system across all three datasets can be attributed
+to three interacting mechanisms. First, specialization across reasoning agents provides
+perspective diversity: the log-focused reasoner attends to temporal event patterns and error
+signatures in the current incident, while the KG-focused reasoner reasons from historical
+recurrence, and the hybrid reasoner synthesizes both. This diversity reduces the risk that all
+agents share the same blind spots---a well-documented advantage of ensemble and multi-agent
+architectures over single-model predictions~\cite{du2023improvingfactualityreasoninglanguage,wu2023autogen}.
+Second, the multi-round debate enables iterative refinement: reasoners receive judge feedback and
+the best hypotheses from other agents before generating their next round of candidates. This
+cross-pollination allows an agent to incorporate insights it would not have generated
+independently, analogous to the self-consistency improvement obtained by aggregating multiple
+chain-of-thought traces~\cite{wang2023selfconsistencyimproveschainthought,wei2023chainofthoughtpromptingelicitsreasoning}.
+Third, the judge scoring operationalizes reliability as a quantitative selection criterion. Rather
+than accepting the first plausible hypothesis, the system enforces a competition in which evidence
+quality, reasoning strength, confidence calibration, completeness, and consistency are all
+evaluated. This guards against the overconfident but unsupported diagnoses that are a documented
+failure mode of single-agent LLM systems~\cite{chen2024rcacopilot}.
 
 \section{Multi-Agent vs.\ Single-Agent Comparison}
 
@@ -102,17 +119,19 @@ HDFS\_v1 Anomaly \fone{}     & 68.1\% & 48.5\% & +19.6\,pp \\
 \end{table}
 
 \subsection{Qualitative Differences}
-Beyond the numbers, the multi-agent system produces qualitatively different outputs:
-\begin{itemize}
-  \item \textbf{Hypothesis diversity}: the multi-agent system generates 9--15 hypotheses per
-        incident (3--5 from each reasoner), while the single-agent produces only 1.
-  \item \textbf{Evidence citation}: multi-agent hypotheses tend to cite more specific evidence
-        because the judge rewards evidence quality.
-  \item \textbf{Confidence calibration}: the judge score provides a calibrated confidence
-        measure, while single-agent confidence is self-reported and often overconfident.
-  \item \textbf{Explanation quality}: multi-agent outputs include judge feedback that explains why
-        the selected hypothesis was preferred.
-\end{itemize}
+
+Beyond quantitative metrics, the multi-agent system produces qualitatively different outputs that
+better serve operator workflows. Each incident yields 9--15 candidate hypotheses (3--5 per
+reasoner), compared to a single hypothesis from the single-agent baseline. This diversity is
+not merely cosmetic: the judge's evidence-quality scoring criterion drives the reasoners toward
+more specific hypothesis statements that cite concrete log events or retrieved historical facts,
+because generic claims score lower~\cite{du2023improvingfactualityreasoninglanguage}. The judge
+Score (0--100) also serves as a calibrated confidence proxy that is more informative than the
+self-reported confidence values in single-agent outputs, which are known to correlate poorly
+with actual correctness in LLM-generated
+content~\cite{chen2024rcacopilot}. Finally, the judge feedback narrative---which explains which
+evidence was compelling and which was missing---provides transparency into the selection decision
+that operators can use to validate the automated diagnosis.
 
 \subsection{When Single-Agent Wins}
 The single-agent baseline achieves higher strict accuracy on Hadoop1 (50.9\% vs 21.8\%). This
@@ -121,120 +140,155 @@ happens to be correct for 50.9\% of cases. However, this ``win'' is misleading: 
 has 0\% recall on three of four classes, making it useless for diagnosing minority failures.
 
 \subsection{Cost-Benefit Tradeoff}
-The multi-agent system requires 8--15$\times$ more LLM calls than the single-agent baseline.
-This cost is justified when:
-\begin{itemize}
-  \item minority class detection is important (e.g., rare but critical failures),
-  \item explanation quality matters (e.g., operator triage),
-  \item cross-domain generalization is needed (e.g., no training data for the target system).
-\end{itemize}
 
-For simple, well-understood failure modes where a single-agent can achieve high recall, the
-additional cost may not be justified.
+The multi-agent system requires 8--15$\times$ more LLM calls than the single-agent baseline,
+translating to a per-incident runtime of 3--5 minutes versus approximately 30 seconds. This
+cost is well justified in the scenarios our evaluation targets: cross-domain settings with no
+available training data, imbalanced datasets where minority-class failures are operationally
+critical, and situations where explanation quality---not just label accuracy---determines the
+utility of the automated diagnosis. For well-understood, high-frequency failure modes where a
+single-agent achieves high recall (e.g., simple disk-full events with unambiguous error strings),
+the additional compute may be unnecessary. A practical deployment strategy would use the judge
+score as a confidence signal to decide when to invoke the full debate: low-confidence cases
+escalate to multi-agent mode, while high-confidence cases accept the single-agent result. This
+adaptive allocation approach is consistent with the cost-aware inference strategies discussed in
+the LLM deployment literature~\cite{chen2024rcacopilot}.
 
 \section{Role of Knowledge Graph}
 
-\subsection{RAG vs.\ Single-Agent}
-Comparing the RAG baseline (which uses KG retrieval) to the pure single-agent baseline isolates
-the contribution of retrieval:
-\begin{itemize}
-  \item On Hadoop1 coarse, RAG achieves 37.9\% macro-\fone{} vs 25.8\% for single-agent
-        (+12.1\,pp).
-  \item On CMCC, RAG achieves 8.6\% accuracy vs 4.3\% for single-agent (+4.3\,pp).
-  \item On HDFS\_v1, RAG achieves 63.0\% accuracy vs 65.0\% for single-agent ($-$2.0\,pp).
-\end{itemize}
+\subsection{RAG vs.\ Single-Agent: Isolating the Retrieval Contribution}
 
-These results suggest that retrieval helps on some datasets but is not uniformly beneficial. The
-benefit depends on whether relevant historical incidents exist in the KG.
+Comparing the RAG baseline to the pure single-agent baseline isolates the marginal contribution
+of KG retrieval. On Hadoop1 coarse, retrieval improves macro-\fone{} from 25.8\% to 37.9\%
+(+12.1\,pp), a substantial gain that confirms the value of historical incident context for
+Hadoop-domain faults where the KG accumulates relevant cases early. On CMCC, the improvement is
+smaller in absolute terms (4.3\% to 8.6\%), because the CMCC evaluation begins with an empty KG
+and the retrieval index is sparse for the first processed cases. On HDFS\_v1, RAG (63.0\%) is
+slightly inferior to the single-agent (65.0\%), suggesting that entity-overlap retrieval does not
+consistently identify relevant historical HDFS block traces, and the injected context occasionally
+adds noise. These results are consistent with the general finding that RAG is most effective when
+the retrieval index contains high-quality, entity-matched historical cases, and least effective in
+cold-start or sparse-index conditions~\cite{lewis2021retrievalaugmentedgenerationknowledgeintensivenlp,roy2024llmagentRCA}.
 
-\subsection{Multi-Agent vs.\ RAG}
-Comparing the full multi-agent system to the RAG baseline isolates the contribution of debate and
-judging:
-\begin{itemize}
-  \item On Hadoop1 coarse, multi-agent achieves 39.1\% macro-\fone{} vs 37.9\% for RAG
-        (+1.2\,pp).
-  \item On CMCC, multi-agent achieves 61.3\% accuracy vs 8.6\% for RAG (+52.7\,pp).
-  \item On HDFS\_v1, multi-agent achieves 69.5\% accuracy vs 63.0\% for RAG (+6.5\,pp).
-\end{itemize}
+\subsection{Multi-Agent vs.\ RAG: Isolating the Debate and Judging Contribution}
 
-The largest improvement is on CMCC, where the RAG baseline collapses to ``unknown'' predictions
-despite having retrieved context. This suggests that retrieval alone is not sufficient---the model
-may ignore or misinterpret retrieved evidence without explicit verification.
+The comparison between the full multi-agent system and the RAG baseline isolates the contribution
+of debate and judging on top of retrieval. On Hadoop1 coarse the gain is modest (+1.2\,pp
+macro-\fone{}), suggesting that for Hadoop-domain faults, retrieval already supplies most of the
+useful context and debate adds incremental benefit at higher compute cost. The picture changes
+dramatically for CMCC: multi-agent achieves 61.3\% accuracy versus 8.6\% for RAG (+52.7\,pp).
+As noted above, the RAG baseline collapses to ``unknown'' on the majority of CMCC cases despite
+having retrieved historical context. This failure mode demonstrates a key limitation of single-pass
+generation with retrieval: the model may receive relevant evidence but still fail to integrate it
+into a correctly labeled diagnosis without a verification step that checks whether the generated
+explanation is actually consistent with the retrieved facts~\cite{roy2024llmagentRCA,cui2025aetherlog}.
+For HDFS\_v1, the multi-agent system improves accuracy by 6.5\,pp (69.5\% vs 63.0\%), confirming
+that debate and judging provide meaningful gains even for binary classification tasks where the
+evidence signal is relatively direct.
 
-\subsection{KG Coverage Effects}
-The effectiveness of KG retrieval depends on coverage:
-\begin{itemize}
-  \item \textbf{High coverage}: when similar historical incidents exist, retrieval provides useful
-        grounding.
-  \item \textbf{Low coverage}: when the KG is sparse or the current incident is novel, retrieval
-        may return irrelevant context.
-  \item \textbf{Cold start}: at the beginning of evaluation, the KG is empty and retrieval
-        provides no benefit.
-\end{itemize}
+\subsection{KG Coverage and Cold-Start Effects}
 
-In our evaluation, the KG is populated incrementally as incidents are processed, so later
-incidents may benefit from earlier diagnoses.
+The effectiveness of KG retrieval is directly tied to the density and relevance of stored
+incidents. In our evaluation, the KG is populated incrementally: as the pipeline processes
+incidents, high-confidence diagnoses are written back to the graph, enabling later incidents to
+benefit from accumulated history. This setup simulates an operational deployment in which the KG
+grows over time and becomes more useful as the system processes more incidents. However, it also
+means that the first incidents processed encounter an empty or sparse KG and receive no retrieval
+benefit---a cold-start problem analogous to the coverage limitations identified in RAG-based
+systems operating on new domains~\cite{lewis2021retrievalaugmentedgenerationknowledgeintensivenlp}.
+This cold-start effect partially explains the smaller RAG improvement on CMCC compared to Hadoop1:
+Hadoop1 cases are processed from a dataset where incident entities share common vocabulary (HDFS
+components, job IDs), producing useful entity-overlap matches early, while CMCC cases involve
+more diverse OpenStack service identifiers that require more accumulated history before retrieval
+becomes effective. Future work should study the KG coverage threshold at which retrieval begins
+to provide consistent benefit.
 
 \section{Debate Protocol Effectiveness}
 
 \subsection{Convergence Behavior}
-In our experiments, most cases converge within 2--3 rounds:
-\begin{itemize}
-  \item \textbf{Round 1}: initial hypotheses are generated independently by each reasoner.
-  \item \textbf{Round 2}: reasoners refine hypotheses based on judge feedback and other agents'
-        top hypotheses.
-  \item \textbf{Round 3}: further refinement typically yields diminishing returns.
-\end{itemize}
 
-Cases that do not converge typically involve ambiguous evidence where multiple diagnoses are
-plausible.
+In our experiments, the debate typically reaches a stable hypothesis within two to three rounds.
+In round~1, each reasoner generates hypotheses independently based on its designated evidence
+source. In round~2, each reasoner receives the judge's feedback on its previous hypotheses along
+with the top-scoring hypotheses from the other agents. This cross-pollination typically causes
+at least one reasoner to refine its candidate toward a better-supported explanation, raising the
+maximum judge score. By round~3, further refinement yields diminishing returns: the maximum
+judge score improves by fewer than 5 points in most cases, triggering the stopping criterion.
+Cases that fail to converge within three rounds typically involve genuinely ambiguous evidence,
+where multiple causal hypotheses are plausible given the available logs and the KG does not
+contain a strongly matching historical precedent. These cases are candidates for human escalation
+rather than automated resolution, and the low judge scores they produce can serve as a flag for
+this purpose---consistent with the confidence-gated escalation strategies proposed for
+production LLM-based RCA systems~\cite{chen2024rcacopilot}.
 
-\subsection{Judge Score Distribution}
-Judge scores range from 0--100. In our experiments:
-\begin{itemize}
-  \item high-confidence correct predictions typically score 70--90,
-  \item low-confidence or incorrect predictions typically score 40--60,
-  \item very low scores ($<$40) are rare and usually indicate malformed hypotheses.
-\end{itemize}
+\subsection{Judge Score Distribution and Calibration}
 
-This distribution suggests that judge scores could be used as a confidence measure for downstream
-decision-making (e.g., flagging low-confidence predictions for human review).
+Judge scores span the full range from 0 to 100, but the empirical distribution is concentrated in
+two bands. Hypotheses that are ultimately selected as correct predictions typically score between
+70 and 90, reflecting strong evidence citation, clear causal reasoning, and appropriate confidence
+calibration. Hypotheses that are rejected or correspond to incorrect predictions typically score
+between 40 and 60, reflecting partial evidence, vague causal chains, or overconfident assertions
+that the judge penalizes under the calibration criterion. Very low scores below 40 are rare and
+generally indicate structurally malformed hypotheses (e.g., missing required fields or circular
+reasoning). This score distribution suggests that the judge score is a useful confidence proxy:
+a threshold around 60 could serve as an operational decision boundary, below which the automated
+diagnosis is flagged for manual review. Using structured agent outputs as calibrated confidence
+estimates is consistent with emerging approaches to LLM confidence quantification in production
+incident management~\cite{chen2024rcacopilot,roy2024llmagentRCA}.
 
-\subsection{Feedback Quality}
-The judge provides structured feedback including strengths, weaknesses, and detailed explanations.
-Qualitative inspection suggests that:
-\begin{itemize}
-  \item feedback correctly identifies missing evidence in weak hypotheses,
-  \item feedback rewards hypotheses that cite specific log events or historical incidents,
-  \item feedback penalizes overconfident claims without supporting evidence.
-\end{itemize}
+\subsection{Feedback Quality and Operator Utility}
 
-This feedback is useful not only for refinement but also for operator review of the final
-diagnosis.
+Qualitative inspection of judge outputs across all three datasets reveals consistent patterns that
+confirm the rubric is functioning as intended. Feedback for low-scoring hypotheses correctly
+identifies missing evidence---for example, flagging that a hypothesis attributes a failure to
+network disconnection without citing any specific connectivity error message in the logs. Feedback
+for high-scoring hypotheses rewards specificity: citations of named log events, block IDs, or
+retrieved historical incidents that share the same failure pattern receive higher evidence quality
+scores. Hypotheses that express high confidence in the absence of direct evidence are consistently
+penalized under the calibration criterion, which is precisely the behavior needed to guard against
+the overconfidence problem identified in single-agent LLM systems~\cite{chen2024rcacopilot}. This
+feedback is useful not only for driving refinement in subsequent rounds but also as a standalone
+explanation artifact for operator review: an engineer consulting the system output can read the
+judge feedback to understand both why the selected hypothesis was preferred and what evidence gaps
+remain, enabling a more informed decision about whether to accept the automated diagnosis or
+conduct additional investigation.
 
 \subsection{Ablation Considerations}
-While we do not conduct formal ablations in this thesis, the results suggest that:
-\begin{itemize}
-  \item \textbf{Removing the judge} would eliminate the verification mechanism and likely reduce
-        performance.
-  \item \textbf{Reducing to one reasoner} would eliminate diversity and likely increase
-        majority-class collapse.
-  \item \textbf{Removing refinement rounds} would reduce the benefit of feedback but save
-        compute.
-\end{itemize}
 
-Formal ablations are left for future work.
+While we do not conduct formal ablations in this thesis, the results permit qualitative
+inferences about the contribution of each component. Removing the judge would eliminate the
+verification mechanism and revert the system to selecting an arbitrary hypothesis from the first
+reasoner, which the single-agent results suggest would substantially increase majority-class
+collapse and reduce minority-class recall. Reducing from three reasoners to one would eliminate
+perspective diversity; empirical studies of multi-agent debate show that this diversity is
+primarily responsible for the improvement over single-agent generation, since a single agent with
+multiple sampling passes provides weaker gains than multiple agents reasoning from different
+evidence sources~\cite{du2023improvingfactualityreasoninglanguage}. Removing refinement rounds
+would reduce the system to a single-pass debate, which may still outperform the single-agent
+baseline through diversity alone but would forego the iterative improvement that feedback enables.
+Formal ablations measuring each of these components independently are an important direction for
+future work, as they would provide cleaner attribution of performance gains to specific
+architectural choices.
 
 \section{Limitations}
-\begin{itemize}
-  \item \textbf{Label semantics}: Some datasets label ``normal'' as ``no injected fault'' rather
-        than ``healthy''.
-  \item \textbf{KG coverage}: Retrieval quality depends on the number and diversity of stored
-        incidents.
-  \item \textbf{Compute}: Multi-agent debate requires multiple LLM calls per incident.
-  \item \textbf{Baseline scope}: We do not train ML/DL baselines in this thesis; these are
-        deferred to future work.
-\end{itemize}
+
+Several limitations of the current work should be considered when interpreting the results.
+First, label semantics in the Hadoop1 dataset present a construct validity challenge: the
+``normal'' label denotes absence of an injected fault rather than a genuinely quiescent system
+state. Logs labeled ``normal'' may still contain connectivity messages, heartbeat events, or
+resource usage warnings that the reasoners interpret as failure signals, explaining the near-zero
+recall on the normal class across all pipelines. This is an inherent property of the dataset
+design~\cite{he2020loghub} rather than a system deficiency, but it complicates interpretation
+and motivates more careful label semantics in future RCA benchmarks. Second, KG retrieval quality
+depends on coverage, which is low at the beginning of evaluation and improves incrementally. This
+cold-start problem may understate the benefit of retrieval in a fully populated operational
+deployment where the KG has been built over months of incident history. Third, the multi-agent
+pipeline requires 8--15 LLM calls per incident compared to 1 for single-agent approaches, a
+compute cost that may be prohibitive for strict real-time incident response. Fourth, we do not
+train or evaluate supervised ML/DL baselines such as DeepLog or LogBERT, which limits the breadth
+of comparison; these methods require dataset-specific training pipelines that are out of scope for
+a zero-shot LLM evaluation, but a comprehensive comparison remains an important direction for
+future work~\cite{du2017deeplog,guo2021logbert}.
 
 \subsection{Model and prompt sensitivity}
 The system relies on prompted generation for both structured extraction and reasoning. Different
