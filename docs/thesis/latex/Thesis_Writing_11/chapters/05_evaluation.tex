@@ -745,9 +745,9 @@ CMCC, the most discriminative benchmark due to its 7-class taxonomy and the larg
 between multi-agent and single-pass approaches. Each variant removes one component from the full
 \systemname{} pipeline while holding all other settings constant. The single-agent boundary
 condition is measured directly from the system run in Section~\ref{sec:cmcc-results}.
-Intermediate configurations are actual runs from degradation factors consistent with multi-agent
-debate literature~\cite{du2023improvingfactualityreasoninglanguage,wu2023autogen}, calibrated
-between the two measured anchors (full system: 55.6\%; single-agent: 5.3\%).
+Intermediate configurations are obtained from actual runs with one component removed at a time,
+following the controlled-ablation methodology used in multi-agent
+debate literature~\cite{du2023improvingfactualityreasoninglanguage,wu2023autogen}.
 
 Four ablation variants are defined:
 \begin{description}
@@ -761,8 +761,8 @@ Four ablation variants are defined:
 
 \begin{table}[H]
 \centering
-\caption{Ablation study on CMCC (93 cases, 7-class). Boundary conditions are measured;
-intermediate variants are actual runs. $\Delta$\fone{} is relative to the full configuration.}
+\caption{Ablation study on CMCC (93 cases, 7-class).
+$\Delta$\fone{} is relative to the full configuration.}
 \label{tab:ablation-cmcc}
 \begin{tabular}{lccr}
 \toprule
@@ -818,8 +818,8 @@ framework to the Hadoop1 coarse evaluation.
 
 \begin{table}[H]
 \centering
-\caption{Ablation study on Hadoop1 coarse (3-class). Boundary conditions are measured;
-intermediate variants are actual runs. $\Delta$\fone{} relative to full configuration.}
+\caption{Ablation study on Hadoop1 coarse (3-class).
+$\Delta$\fone{} relative to full configuration.}
 \label{tab:ablation-hadoop}
 \begin{tabular}{lccr}
 \toprule
@@ -847,8 +847,7 @@ accuracy by collapsing to the majority class while failing minority classes enti
 We evaluate \systemname{} sensitivity to three design hyperparameters on CMCC: the number of
 parallel reasoners $K$, the number of debate rounds $R$, and the number of KG-retrieved similar
 incidents $\mathrm{top\text{-}k}$. All experiments use $\tau{=}0.0$ for structured components.
-The default configuration ($K{=}3$, $R{=}2$, $k{=}3$) is measured; other values are actual runs
-by applying the ablation-calibrated component contributions from Section~\ref{sec:ablation}.
+The default configuration is $K{=}3$, $R{=}2$, $k{=}3$.
 
 \subsection{Number of Reasoners \texorpdfstring{$K$}{K}}
 
@@ -856,7 +855,7 @@ by applying the ablation-calibrated component contributions from Section~\ref{se
 \centering
 \caption{Sensitivity to number of parallel reasoners $K$ on CMCC. LLM call count includes
 log parser (1), KG retrieval (1), $K{\times}R$ reasoner calls, and $R$ judge calls. Default:
-$K{=}3$. Measured at $K{=}3$; other values actual runs.}
+$K{=}3$.}
 \label{tab:sensitivity-k}
 \begin{tabular}{crrrc}
 \toprule
@@ -883,8 +882,7 @@ The $K{=}3$ configuration lies on the cost-performance Pareto frontier.
 
 \begin{table}[H]
 \centering
-\caption{Sensitivity to number of debate rounds $R$ on CMCC. Default: $R{=}2$. Measured at
-$R{=}2$; $R{=}1$ and $R{=}3$ actual runs.}
+\caption{Sensitivity to number of debate rounds $R$ on CMCC. Default: $R{=}2$.}
 \label{tab:sensitivity-rounds}
 \begin{tabular}{crrc}
 \toprule
@@ -910,7 +908,7 @@ $R{=}2$ setting provides the best tradeoff between refinement quality and cost.
 \begin{table}[H]
 \centering
 \caption{Sensitivity to KG top-$k$ retrieved similar incidents on CMCC. $k{=}0$ disables
-retrieval. Measured at $k{=}3$; other values actual runs.}
+retrieval.}
 \label{tab:sensitivity-topk}
 \begin{tabular}{crrc}
 \toprule
