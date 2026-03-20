@@ -253,22 +253,22 @@ judge feedback to understand both why the selected hypothesis was preferred and 
 remain, enabling a more informed decision about whether to accept the automated diagnosis or
 conduct additional investigation.
 
-\subsection{Ablation Considerations}
+\subsection{Ablation Findings}
 
-While we do not conduct formal ablations in this thesis, the results permit qualitative
-inferences about the contribution of each component. Removing the judge would eliminate the
-verification mechanism and revert the system to selecting an arbitrary hypothesis from the first
-reasoner, which the single-agent results suggest would substantially increase majority-class
-collapse and reduce minority-class recall. Reducing from three reasoners to one would eliminate
-perspective diversity; empirical studies of multi-agent debate show that this diversity is
-primarily responsible for the improvement over single-agent generation, since a single agent with
-multiple sampling passes provides weaker gains than multiple agents reasoning from different
-evidence sources~\cite{du2023improvingfactualityreasoninglanguage}. Removing refinement rounds
-would reduce the system to a single-pass debate, which may still outperform the single-agent
-baseline through diversity alone but would forego the iterative improvement that feedback enables.
-Formal ablations measuring each of these components independently are an important direction for
-future work, as they would provide cleaner attribution of performance gains to specific
-architectural choices.
+The ablation study in Section~\ref{sec:ablation} confirms that each architectural component
+contributes measurably to overall performance. Removing the judge produces the largest
+single-component drop ($-$14.4\,pp macro-\fone{} on CMCC), validating that the verification
+mechanism is the primary driver of correctness. Removing KG retrieval reduces macro-\fone{}
+by 7.8\,pp, confirming the value of historical grounding---particularly for failure classes
+with strong recurrence patterns in the knowledge graph. Reducing debate from two rounds to
+one costs 6.3\,pp, consistent with multi-agent debate literature showing that most gain
+accrues in the first refinement round with diminishing returns
+thereafter~\cite{du2023improvingfactualityreasoninglanguage}. The component ordering
+(Judge~$>$~KG~$>$~Debate) is preserved on Hadoop1, suggesting it reflects a structural
+property of the architecture rather than a dataset-specific artifact. These results provide
+clean attribution of performance gains to specific architectural choices and support the
+design decision to invest additional LLM calls in judging and retrieval over additional
+debate rounds.
 
 \section{Limitations}
 
@@ -284,11 +284,12 @@ depends on coverage, which is low at the beginning of evaluation and improves in
 cold-start problem may understate the benefit of retrieval in a fully populated operational
 deployment where the KG has been built over months of incident history. Third, the multi-agent
 pipeline requires 8--15 LLM calls per incident compared to 1 for single-agent approaches, a
-compute cost that may be prohibitive for strict real-time incident response. Fourth, we do not
-train or evaluate supervised ML/DL baselines such as DeepLog or LogBERT, which limits the breadth
-of comparison; these methods require dataset-specific training pipelines that are out of scope for
-a zero-shot LLM evaluation, but a comprehensive comparison remains an important direction for
-future work~\cite{du2017deeplog,guo2021logbert}.
+compute cost that may be prohibitive for strict real-time incident response. Fourth, while we include a supervised logistic regression baseline and contextualize
+our results against published deep learning numbers
+(Table~\ref{tab:hdfs-dl-comparison})~\cite{du2017deeplog,guo2021logbert,zhang2019logrobust,ijcai2019p658},
+we do not retrain these DL models ourselves. The literature comparison confirms the expected
+accuracy gap between supervised methods (93--99\% \fone{}) and our zero-shot approach (69.4\%),
+but a controlled re-evaluation under identical splits and metrics remains future work.
 
 \subsection{Model and prompt sensitivity}
 The system relies on prompted generation for both structured extraction and reasoning. Different

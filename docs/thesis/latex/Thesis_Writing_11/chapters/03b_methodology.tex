@@ -165,15 +165,19 @@ by improved diagnostic quality in cross-domain and imbalanced settings.
 \section{Scope and Limitations of the Methodology}
 
 \subsection{ML/DL Baselines}
-We do not include supervised ML/DL baselines (e.g., DeepLog, LogAnomaly, LogBERT) in our main
-comparison because:
+Our primary comparison targets zero-shot LLM pipelines (single-agent, RAG, multi-agent).
+We additionally include a supervised logistic regression baseline following
+the Loglizer protocol~\cite{he2016loglizer} and contextualize our HDFS results against
+published deep learning numbers (DeepLog, LogAnomaly, LogRobust, LogBERT) in
+Table~\ref{tab:hdfs-dl-comparison}. We do not retrain these DL models ourselves because:
 \begin{itemize}
   \item they require dataset-specific training and hyperparameter tuning,
   \item they use different preprocessing and feature pipelines,
-  \item our goal is to evaluate explanation-oriented, zero-shot LLM systems.
+  \item our primary contribution is explanation-oriented, zero-shot RCA.
 \end{itemize}
 
-Comparison with trained ML/DL baselines is deferred to future work.
+A controlled re-evaluation of DL baselines under identical splits and metrics remains
+future work.
 
 \subsection{Single-Run Evaluation}
 Due to computational cost, we report single-run results. This is a limitation because LLM outputs

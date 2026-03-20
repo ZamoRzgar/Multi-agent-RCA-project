@@ -100,9 +100,10 @@ This work has several limitations that should be considered when interpreting th
         LLM outputs can vary across runs, and multi-run aggregation would provide more robust
         estimates.
 
-  \item \textbf{No ML/DL baselines}: We did not compare against trained ML/DL baselines (e.g.,
-        DeepLog, LogAnomaly) because they require different preprocessing and training pipelines.
-        This limits the scope of our conclusions.
+  \item \textbf{Literature-only DL comparison}: We contextualize results against published
+        deep learning baselines (DeepLog, LogAnomaly, LogRobust, LogBERT) via
+        Table~\ref{tab:hdfs-dl-comparison}, but do not retrain these models under controlled
+        conditions. This limits direct comparability across methods.
 
   \item \textbf{Label normalization errors}: Mapping free-text hypotheses to discrete labels
         introduces potential errors. Our conservative normalizer may undercount correct diagnoses
@@ -115,13 +116,17 @@ This work has several limitations that should be considered when interpreting th
 
 \section{Future Work}
 
-\subsection{Ablation Studies}
-Systematic ablations would help isolate the contribution of each component:
+\subsection{Extended Ablations}
+The ablation study in Section~\ref{sec:ablation} measured the contribution of the judge,
+KG retrieval, and debate rounds on CMCC and Hadoop1. Several extensions would strengthen
+these findings:
 \begin{itemize}
-  \item disable KG retrieval to measure the value of historical context,
-  \item disable refinement rounds to measure the value of iterative debate,
-  \item swap model families to measure sensitivity to model choice,
-  \item vary the number of reasoners to measure the value of diversity.
+  \item swap model families (e.g., Llama~3 vs.\ Mistral vs.\ Qwen) to measure sensitivity
+        to the underlying LLM,
+  \item vary the number of reasoners beyond $K{=}4$ to identify the saturation point on
+        larger datasets,
+  \item replicate the ablation on additional datasets (e.g., BGL, Thunderbird) to test
+        generality of the component ordering.
 \end{itemize}
 
 \subsection{Improved Retrieval}
@@ -132,12 +137,17 @@ Current retrieval is based on entity overlap. Future work could explore:
   \item active retrieval where reasoners can request additional context during debate.
 \end{itemize}
 
-\subsection{ML/DL Baseline Comparison}
-A comprehensive comparison with trained ML/DL baselines would strengthen the evaluation:
+\subsection{Controlled DL Baseline Re-evaluation}
+Table~\ref{tab:hdfs-dl-comparison} contextualizes our results against published DL numbers,
+but a controlled re-evaluation under identical data splits and evaluation metrics would
+enable direct comparison. Specific directions include:
 \begin{itemize}
-  \item DeepLog, LogAnomaly, LogBERT for anomaly detection,
-  \item supervised classifiers over parsed log templates,
-  \item hybrid systems that combine learned detectors with LLM-based explanation.
+  \item retraining DeepLog, LogAnomaly, and LogBERT on the same balanced HDFS subset
+        used in our evaluation,
+  \item evaluating hybrid systems that combine learned anomaly detectors with
+        LLM-based explanation generation,
+  \item benchmarking on additional datasets (BGL, Thunderbird) where published DL
+        numbers are available.
 \end{itemize}
 
 \subsection{Domain Adaptation}

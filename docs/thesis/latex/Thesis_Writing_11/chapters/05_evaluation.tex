@@ -602,14 +602,57 @@ requiring evidence quality to be scored.
 
 \paragraph{Connection to log anomaly research.}
 The HDFS setting is closely related to established supervised approaches such as
-DeepLog~\cite{du2017deeplog} and subsequent work on robustness and semantics-aware
-detection~\cite{zhang2019logrobust,ijcai2019p658,guo2021logbert}. As Table~\ref{tab:hdfs-results}
-shows, a simple logistic regression on Drain-parsed event counts already achieves 93.5\%
-macro-\fone{}~\cite{he2016loglizer} on the full HDFS dataset---well above our 69.4\%. This is
-expected: binary detection with labeled training data is a substantially easier problem than
-zero-shot 7-class RCA. Our goal is complementary---to provide actionable causal diagnoses
-without dataset-specific training---and the HDFS results confirm that the multi-agent approach
-adds value over single-call LLM baselines even in this simpler setting.
+DeepLog~\cite{du2017deeplog}, LogAnomaly~\cite{ijcai2019p658},
+LogRobust~\cite{zhang2019logrobust}, and LogBERT~\cite{guo2021logbert}.
+Table~\ref{tab:hdfs-dl-comparison} contextualizes our results against published numbers
+from these methods.
+
+\begin{table}[H]
+\centering
+\caption{Literature comparison on HDFS anomaly detection. Supervised and semi-supervised
+methods are trained on the full HDFS dataset (${\sim}575$K block traces); our system
+operates zero-shot with no training data. Numbers are macro-\fone{} as reported in the
+original papers or the standardized survey of~\cite{le2022logdlhowfar}.}
+\label{tab:hdfs-dl-comparison}
+\begin{tabular}{llcl}
+\toprule
+\textbf{Method} & \textbf{Paradigm} & \textbf{Macro \fone{}} & \textbf{Source} \\
+\midrule
+LogBERT          & Supervised (BERT)   & ${\sim}$99\%  & \cite{guo2021logbert} \\
+LogRobust        & Supervised (Bi-LSTM)& ${\sim}$98\%  & \cite{zhang2019logrobust} \\
+LogAnomaly       & Semi-supervised     & ${\sim}$96\%  & \cite{ijcai2019p658} \\
+DeepLog          & Semi-supervised (LSTM)& ${\sim}$96\% & \cite{du2017deeplog} \\
+LR (Loglizer)    & Supervised (ML)     & 93.5\%        & \cite{he2016loglizer} \\
+\midrule
+\textbf{\systemname{}} & \textbf{Zero-shot (LLM)} & \textbf{69.4\%} & This work \\
+Single-Agent     & Zero-shot (LLM)     & 61.3\%        & This work \\
+RAG              & Zero-shot (LLM)     & 63.6\%        & This work \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The gap between supervised methods (93--99\% \fone{}) and our zero-shot system (69.4\%)
+is substantial but expected, and reflects a fundamental difference in task setting rather
+than a deficiency:
+\begin{enumerate}
+  \item \textbf{Training data.} All supervised and semi-supervised methods require
+        labeled or sequentially ordered training data from the target distribution.
+        Our system requires none---it generalizes across datasets without retraining.
+  \item \textbf{Task scope.} The DL baselines perform binary anomaly \emph{detection}
+        (normal vs.\ anomaly label). \systemname{} additionally produces structured
+        causal \emph{explanations} with evidence citations, which is the primary
+        contribution of this thesis.
+  \item \textbf{Evaluation protocol.} Published DL numbers use the full HDFS dataset
+        with standard train/test splits (${\sim}$575K traces). Our evaluation uses a
+        balanced 200-sample subset to ensure meaningful per-class metrics under
+        zero-shot conditions.
+\end{enumerate}
+The comparison is therefore not apples-to-apples, but it is important to report: it
+establishes where our system sits relative to the state of the art and clarifies that
+the multi-agent approach adds value through \emph{explanation quality} and
+\emph{zero-shot generalizability} rather than raw detection accuracy. The HDFS results
+confirm that even in this simpler binary setting, the multi-agent system outperforms
+single-call LLM baselines by 6--8\,pp in macro-\fone{}.
 
 \section{Results Summary}
 
