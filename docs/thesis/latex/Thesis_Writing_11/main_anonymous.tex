@@ -1,0 +1,193 @@
+% -*- coding: utf-8 -*-
+% !TEX program = xelatex
+%%
+%%  NKU Master's Thesis — ANONYMOUS REVIEW VERSION
+%%  Multi-Agent Knowledge-Graph-Guided Reasoning for Reliable Log-Based Root Cause Analysis
+%%
+%%  Compile with XeLaTeX (recommended):
+%%    xelatex main_anonymous && bibtex8 main_anonymous && xelatex main_anonymous && xelatex main_anonymous
+%%
+\documentclass[12pt,openany]{book}
+\usepackage{amsmath,amssymb}
+\usepackage{pifont}
+\usepackage{ifxetex}
+\ifxetex
+  \usepackage[bookmarksnumbered]{hyperref}
+\else
+  \usepackage[unicode,bookmarksnumbered]{hyperref}
+\fi
+
+%% English mode NKU thesis
+\usepackage[emptydoublepage,English]{NKThesis}
+
+%% Bibliography: biblatex with nkthesis style
+\usepackage[backend=bibtex8, defernumbers=true, sorting=nty, style=nkthesis]{biblatex}
+
+\hypersetup{colorlinks=true,
+            pdfborder=0 0 1,
+            citecolor=black,
+            linkcolor=black}
+
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{statistics}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc, patterns}
+
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{longtable}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{pdfpages}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\tiny,
+  keywordstyle=\color{blue},
+  commentstyle=\color{green!60!black},
+  stringstyle=\color{red},
+  showstringspaces=false
+}
+
+\addbibresource{references.bib}
+\DeclareBibliographyCategory{cited}
+\AtEveryCitekey{\addtocategory{cited}{\thefield{entrykey}}}
+
+\includeonly{
+  abstract,
+  chapters/01_introduction,
+  chapters/02_related_work,
+  chapters/03_system_design,
+  chapters/03b_methodology,
+  chapters/04_implementation,
+  chapters/05_evaluation,
+  chapters/06_discussion,
+  chapters/07_conclusion,
+  appendices,
+  references
+}
+
+%% Custom commands
+\newcommand{\systemname}{MAKGGR}
+\newcommand{\fone}{F\textsubscript{1}}
+
+%% Theorem environments
+\newtheorem{Theorem}{\hskip 2em Theorem}[chapter]
+\newtheorem{Lemma}[Theorem]{\hskip 2em Lemma}
+\newtheorem{Corollary}[Theorem]{\hskip 2em Corollary}
+\newtheorem{Proposition}[Theorem]{\hskip 2em Proposition}
+\newtheorem{Definition}[Theorem]{\hskip 2em Definition}
+\newtheorem{Example}[Theorem]{\hskip 2em Example}
+\newtheorem{Remark}[Theorem]{\hskip 2em Remark}
+
+%% ---------------------------------------------------------------
+%%  Override front-matter pages for anonymous review:
+%%  - Replace NKTtitlepage with anonymous cover
+%%  - Suppress declaration and authorization pages
+%% ---------------------------------------------------------------
+\makeatletter
+\long\def\NKTtitlepage{%
+  \clearpage
+  \thispagestyle{empty}
+  \parindent 0em
+  \begin{center}
+    \vspace*{-5mm}
+    %% Nankai University calligraphy logo
+    \includegraphics[width=55mm]{Nankai_coverpage_logo.png}
+
+    \vskip 10mm
+    {\zihaoer\heiti\jiacu 南开大学硕士毕业（学位）论文}
+
+    \vskip 6mm
+    {\zihaosi（匿名评阅封面）}
+  \end{center}
+
+  \vskip 35mm
+
+  \zihaosi
+  \hskip 25mm 论文题目：\parbox[t]{90mm}{%
+    Multi-Agent Knowledge-Graph-Guided Reasoning
+    for Reliable Log-Based Root Cause Analysis}
+
+  \vfill
+
+  \hskip 25mm 一级学科：软件工程
+
+  \vskip 8mm
+  \hskip 25mm 二级学科：
+
+  \vskip 14mm
+  \hskip 25mm 论文编号：
+
+  \vskip 35mm
+  \clearpage
+}
+\long\def\NKTdeclaration{}
+\long\def\NKTauthorization{}
+\makeatother
+
+\begin{document}
+
+%% ---------------------------------------------------------------
+%%  Thesis metadata (anonymous: only title needed for internal setup)
+%% ---------------------------------------------------------------
+\NKTsetup{%
+  论文题目(中文) = 基于多智能体知识图谱引导推理的可靠日志根因分析,
+  副标题        = ,
+  论文题目(英文) = Multi-Agent Knowledge-Graph-Guided Reasoning
+                   for Reliable Log-Based Root Cause Analysis,
+  论文作者       = ,
+  学号           = ,
+  指导教师       = ,
+  指导教师职称   = ,
+  申请学位       = 学历硕士,
+  培养单位       = ,
+  学科专业       = 计算机科学与技术,
+  研究方向       = ,
+  答辩委员会主席  = ,
+  评阅人         = ,
+  中图分类号     = TP311,
+  UDC            = 004,
+  学校代码       = 10055,
+  密级           = 公开,
+  保密期限       = ,
+  审批表编号     = ,
+  批准日期       = ,
+  论文完成时间   = ,
+  答辩日期       = ,
+  签字日期       = ,
+  论文类别       = 学历硕士,
+  院/系/所       = ,
+  专业           = 计算机科学与技术,
+  联系电话       = ,
+  Email          = ,
+  通讯地址(邮编) = ,
+  备注           =
+}
+
+\include{abstract}
+\tableofcontents
+
+\include{chapters/01_introduction}
+\include{chapters/02_related_work}
+\include{chapters/03_system_design}
+\include{chapters/03b_methodology}
+\include{chapters/04_implementation}
+\include{chapters/05_evaluation}
+\include{chapters/06_discussion}
+\include{chapters/07_conclusion}
+
+\include{appendices}
+\include{references}
+
+%% NOTE: acknowledgements and resume are intentionally excluded
+%% for anonymous review per university requirements.
+
+\end{document}
